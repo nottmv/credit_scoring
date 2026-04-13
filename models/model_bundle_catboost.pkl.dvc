@@ -1,0 +1,5 @@
+outs:
+- md5: c4fe4666eebc71c14da90e61c67e4ae5
+  size: 579191
+  hash: md5
+  path: model_bundle_catboost.pkl
