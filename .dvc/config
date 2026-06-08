@@ -1,4 +1,4 @@
 [core]
     remote = mlops
 ['remote "mlops"']
-    url = https://drive.google.com/drive/folders/1HbYd0bgGCuGbBdKDmH0dCGJQt-pOHcGv?usp=sharing
+    url = gdrive://1HbYd0bgGCuGbBdKDmH0dCGJQt-pOHcGv

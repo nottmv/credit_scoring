@@ -1,0 +1,45 @@
+# Не входит в kubectl apply по умолчанию (Job не идемпотентен при повторном apply).
+# minikube cp ./data/raw/credit_scoring.csv minikube:/tmp/credit-train/credit_scoring.csv
+# kubectl apply -f k8s/manual/job-retrain.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: credit-scoring-retrain
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: train
+          image: credit-scoring-api:latest
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          command:
+            - python
+            - src/models/train_model.py
+            - --data
+            - /traindata/credit_scoring.csv
+            - --model-type
+            - catboost
+            - --save
+            - /trainout/model_bundle_catboost.pkl
+          env:
+            - name: PYTHONPATH
+              value: "/app"
+          volumeMounts:
+            - name: traindata
+              mountPath: /traindata
+              readOnly: true
+            - name: trainout
+              mountPath: /trainout
+      volumes:
+        - name: traindata
+          hostPath:
+            path: /tmp/credit-train
+            type: DirectoryOrCreate
+        - name: trainout
+          hostPath:
+            path: /tmp/credit-train-out
+            type: DirectoryOrCreate

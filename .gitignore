@@ -87,3 +87,21 @@ target/
 
 # Mypy cache
 .mypy_cache/
+
+# Google Drive download temp
+_gdrive_download/
+
+# Local venv / IDE
+.venv/
+venv/
+
+# MLflow local runs (Docker volume holds production artifacts)
+mlruns/
+
+# CatBoost training logs
+catboost_info/
+
+# Runtime reports (generated in CI/local)
+reports/*.jsonl
+reports/last_drift.json
+reports/champion_metrics.json

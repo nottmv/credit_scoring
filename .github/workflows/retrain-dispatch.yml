@@ -1,0 +1,39 @@
+# Ручной запуск переобучения в CI (нужны данные в репозитории или артефакте).
+name: Retrain (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_type:
+        description: "catboost | xgboost | both"
+        default: catboost
+        type: string
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: |
+          pip install -U pip setuptools wheel
+          pip install -r requirements.txt
+      - name: Train (if data present)
+        run: |
+          if [ ! -f data/raw/credit_scoring.csv ]; then
+            echo "Add data/raw/credit_scoring.csv (or use DVC/cache) for training in CI."
+            exit 0
+          fi
+          python src/models/train_model.py \
+            --data data/raw/credit_scoring.csv \
+            --model-type "${{ github.event.inputs.model_type }}" \
+            --save models/model_bundle_catboost.pkl
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: trained-models
+          path: models/
+          if-no-files-found: ignore

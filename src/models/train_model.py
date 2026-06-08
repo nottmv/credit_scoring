@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -271,7 +272,15 @@ def _detect_time_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
 
 def split_data_3way(
     df: pd.DataFrame,
-    cfg: TrainConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
+    cfg: TrainConfig,
+) -> Tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.Series,
+    pd.Series,
+    pd.Series,
+]:
     if cfg.target_col not in df.columns:
         raise ValueError(f"Target column {cfg.target_col} not found")
 
@@ -504,8 +513,10 @@ def train_and_evaluate(
     df_raw: pd.DataFrame,
     cfg: TrainConfig,
     model_type: str,
-) -> Tuple[ModelBundle, Dict[str, Any]]:
-    X_train_raw, X_test_raw, X_val_raw, y_train, y_test, y_val = split_data_3way(df_raw, cfg)
+) -> Tuple[ModelBundle, Dict[str, Any], Dict[str, Tuple[pd.DataFrame, pd.Series]]]:
+    X_train_raw, X_test_raw, X_val_raw, y_train, y_test, y_val = (
+        split_data_3way(df_raw, cfg)
+    )
 
     X_train, fit_params = build_features_for_training(X_train_raw, fit_params=None)
     X_test, _ = build_features_for_training(X_test_raw, fit_params=fit_params)
@@ -535,6 +546,12 @@ def train_and_evaluate(
     print("\nOverfit check:")
     print(report["overfit"])
 
+    eval_sets = {
+        "train": (X_train, y_train),
+        "test": (X_test, y_test),
+        "validation": (X_val, y_val),
+    }
+
     bundle = ModelBundle(
         model_type=model_type,
         model=model,
@@ -542,7 +559,7 @@ def train_and_evaluate(
         preprocessing_params=fit_params,
         config=asdict(cfg),
     )
-    return bundle, report
+    return bundle, report, eval_sets
 
 
 def score_client_id(
@@ -571,6 +588,90 @@ def score_client_id(
     return {"client_id": client_id_out, "probability": proba}
 
 
+def write_champion_metrics(report: Dict[str, Any], path: Union[str, Path]) -> None:
+    """Snapshot of offline validation metrics (merged per model_type for monitoring)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    val = next((m for m in report["metrics"] if m["dataset"] == "validation"), None)
+    test = next((m for m in report["metrics"] if m["dataset"] == "test"), None)
+    mt = report["model_type"]
+    payload = {
+        "model_type": mt,
+        "validation_roc_auc": val["roc_auc"] if val else None,
+        "test_roc_auc": test["roc_auc"] if test else None,
+        "overfit": report.get("overfit", {}),
+    }
+    store: Dict[str, Any] = {"models": {}}
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict) and "models" in raw:
+                store = raw
+        except json.JSONDecodeError:
+            pass
+    store.setdefault("models", {})[mt] = payload
+    path.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _ensure_mlflow_experiment(tracking_uri: str, experiment_name: str) -> str:
+    """Use an experiment whose artifacts upload via the tracking server (mlflow-artifacts:/)."""
+    import mlflow
+    from mlflow.tracking import MlflowClient
+
+    mlflow.set_tracking_uri(tracking_uri)
+    client = MlflowClient(tracking_uri)
+    exp = client.get_experiment_by_name(experiment_name)
+    if exp is not None and str(exp.artifact_location).startswith("mlflow-artifacts:"):
+        return exp.experiment_id
+
+    served_name = f"{experiment_name}_served"
+    served = client.get_experiment_by_name(served_name)
+    if served is None:
+        return client.create_experiment(
+            served_name,
+            artifact_location="mlflow-artifacts:/",
+        )
+    return served.experiment_id
+
+
+def log_mlflow_run(
+    report: Dict[str, Any],
+    bundle: ModelBundle,
+    bundle_path: Path,
+    eval_sets: Dict[str, Tuple[pd.DataFrame, pd.Series]],
+    tracking_uri: str,
+    experiment_name: str,
+    register_name: Optional[str],
+) -> None:
+    import mlflow
+
+    from src.models.mlflow_pyfunc import log_pyfunc_model
+    from src.models.mlflow_viz import log_training_plots
+
+    experiment_id = _ensure_mlflow_experiment(tracking_uri, experiment_name)
+    mlflow.set_tracking_uri(tracking_uri)
+    with mlflow.start_run(experiment_id=experiment_id):
+        mlflow.log_param("model_type", report["model_type"])
+        for m in report["metrics"]:
+            prefix = m["dataset"]
+            mlflow.log_metric(f"{prefix}_roc_auc", m["roc_auc"])
+            mlflow.log_metric(f"{prefix}_gini", m["gini"])
+        for key, val in report.get("overfit", {}).items():
+            if isinstance(val, (int, float)) and not isinstance(val, bool):
+                mlflow.log_metric(key, float(val))
+
+        plot_artifacts = log_training_plots(bundle, report, eval_sets)
+        mlflow.log_param("plot_artifacts_count", len(plot_artifacts))
+
+        test_X, _ = eval_sets["test"]
+        input_example = test_X.head(1)
+        log_pyfunc_model(
+            str(bundle_path.resolve()),
+            registered_model_name=register_name,
+            input_example=input_example,
+        )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="data/raw/credit_scoring.csv")
@@ -590,6 +691,25 @@ def main():
         default=None,
         help="If set, outputs probability for this id",
     )
+    parser.add_argument(
+        "--mlflow-uri",
+        default=os.environ.get("MLFLOW_TRACKING_URI"),
+        help="MLflow tracking URI (logs metrics + pyfunc when set)",
+    )
+    parser.add_argument(
+        "--mlflow-experiment",
+        default="credit_scoring",
+    )
+    parser.add_argument(
+        "--mlflow-register",
+        default=None,
+        help="Optional Model Registry name",
+    )
+    parser.add_argument(
+        "--champion-report",
+        default="reports/champion_metrics.json",
+        help="Write offline validation baseline for monitoring UI",
+    )
     args = parser.parse_args()
 
     print(f"\nModel type: {args.model_type}")
@@ -605,7 +725,7 @@ def main():
     bundles: Dict[str, ModelBundle] = {}
     for mt in model_types:
         print(f"\n=== Training: {mt} ===")
-        bundle, report = train_and_evaluate(df_raw, cfg, mt)
+        bundle, report, eval_sets = train_and_evaluate(df_raw, cfg, mt)
         bundles[mt] = bundle
 
         out_path = save_path
@@ -619,6 +739,21 @@ def main():
         print(f"\nSaved bundle to {out_path}")
         print("\nTrain report (json):")
         print(json.dumps(report, ensure_ascii=False, indent=2))
+
+        write_champion_metrics(report, args.champion_report)
+        print(f"\nChampion / baseline metrics written to {args.champion_report}")
+
+        if args.mlflow_uri:
+            log_mlflow_run(
+                report,
+                bundle,
+                out_path,
+                eval_sets,
+                args.mlflow_uri,
+                args.mlflow_experiment,
+                args.mlflow_register,
+            )
+            print(f"\nMLflow: logged run to {args.mlflow_uri}")
 
     if args.score_client_id is not None:
         client_id = type(df_raw[CLIENT_ID_COL].iloc[0])(args.score_client_id)

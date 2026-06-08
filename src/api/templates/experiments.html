@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Credit Scoring — Эксперименты</title>
+  <style>
+    :root {
+      --primary: #1d3557; --accent: #e63946; --ok: #2a9d8f;
+      --bg: #f4f6fb; --card: #fff; --border: #e2e6ef; --muted: #6b7280;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: #1a1a2e; }
+    nav {
+      background: var(--primary); color: #fff;
+      display: flex; align-items: center;
+      padding: 0 1.5rem; height: 52px; gap: 1.5rem;
+      position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,.18);
+    }
+    nav .brand { font-weight: 700; font-size: 1.05rem; }
+    nav a { color: rgba(255,255,255,.78); text-decoration: none; font-size: .92rem;
+      padding: .25rem .5rem; border-radius: 4px; }
+    nav a:hover, nav a.active { background: rgba(255,255,255,.18); color: #fff; }
+    nav .spacer { flex: 1; }
+    .page { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
+    h1 { font-size: 1.4rem; color: var(--primary); margin-bottom: .4rem; }
+    p.sub { color: var(--muted); font-size: .9rem; margin-bottom: 1.5rem; }
+    .card { background: var(--card); border-radius: 10px; padding: 1.25rem;
+      box-shadow: 0 1px 4px rgba(0,0,0,.07); border: 1px solid var(--border); margin-bottom: 1.25rem; }
+    .section-title { font-size: 1.05rem; font-weight: 600; color: var(--primary);
+      margin-bottom: .75rem; }
+    table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+    th { text-align: left; padding: .5rem .75rem; background: #f8f9fc;
+      border-bottom: 2px solid var(--border); font-weight: 600; color: var(--muted);
+      font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+    td { padding: .45rem .75rem; border-bottom: 1px solid var(--border); }
+    tr:hover td { background: #f8f9fc; }
+    .badge { display: inline-block; padding: .15rem .5rem; border-radius: 10px;
+      font-size: .77rem; font-weight: 600; }
+    .badge-ok { background: #d1fae5; color: #065f46; }
+    .badge-run { background: #dbeafe; color: #1e40af; }
+    .badge-fail { background: #fee2e2; color: #c1121f; }
+    .metric-chip { display: inline-block; background: #f1f5f9; border: 1px solid var(--border);
+      border-radius: 6px; padding: .2rem .5rem; font-size: .8rem; margin: .1rem; }
+    .champ-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    .champ-item { background: #f8f9fc; border-radius: 8px; padding: 1rem; border-left: 4px solid var(--primary); }
+    .champ-item .model-name { font-size: .8rem; color: var(--muted); text-transform: uppercase; margin-bottom: .3rem; }
+    .champ-item .auc { font-size: 1.8rem; font-weight: 800; color: var(--primary); }
+    .champ-item .sub { font-size: .8rem; color: var(--muted); margin-top: .2rem; }
+    .empty-state { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+    .empty-state .icon { font-size: 2.5rem; margin-bottom: .5rem; }
+    a.ext-link { color: var(--primary); font-weight: 600; text-decoration: underline; }
+    .btn { display: inline-flex; align-items: center; gap: .4rem;
+      padding: .5rem 1rem; border-radius: 6px; font-size: .88rem;
+      font-weight: 600; cursor: pointer; border: none; transition: opacity .15s;
+      text-decoration: none; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn:hover { opacity: .87; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="brand">Credit Scoring MLOps</span>
+  <a href="/dashboard">Мониторинг</a>
+  <a href="/ui/inference">Инференс</a>
+  <a href="/ui/experiments" class="active">Эксперименты</a>
+  <span class="spacer"></span>
+  <a href="{{ mlflow_url }}" target="_blank" style="background:rgba(255,255,255,.12); color:#fff; padding:.25rem .75rem; border-radius:6px; font-size:.85rem;">
+    MLflow UI
+  </a>
+</nav>
+
+<div class="page">
+  <h1>MLflow — Эксперименты</h1>
+  <p class="sub">
+    Последние запуски обучения из MLflow tracking server (<a href="{{ mlflow_url }}" target="_blank" class="ext-link">{{ mlflow_url }}</a>).
+    Полный интерфейс доступен в MLflow UI.
+  </p>
+
+  <!-- Champion metrics -->
+  {% if champion and champion.models %}
+  <div class="card">
+    <div class="section-title">Champion-метрики (offline validation)</div>
+    <div class="champ-grid">
+      {% for mt, info in champion.models.items() %}
+      <div class="champ-item">
+        <div class="model-name">{{ mt }}</div>
+        <div class="auc">{{ "%.4f"|format(info.validation_roc_auc) if info.validation_roc_auc else "—" }}</div>
+        <div class="sub">Val ROC-AUC</div>
+        <div class="sub" style="margin-top:.3rem;">
+          Test AUC: {{ "%.4f"|format(info.test_roc_auc) if info.test_roc_auc else "—" }}
+        </div>
+        {% if info.overfit %}
+        <div class="sub" style="margin-top:.3rem;">
+          Train↔Test gap: {{ info.overfit.get('train_test_auc_gap', '—') }}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Runs table -->
+  <div class="card">
+    <div class="section-title" style="display:flex; align-items:center; justify-content:space-between;">
+      <span>Последние запуски обучения</span>
+      <a href="{{ mlflow_url }}" target="_blank" class="btn btn-primary">Открыть MLflow →</a>
+    </div>
+    {% if runs %}
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Run ID</th>
+            <th>Эксперимент</th>
+            <th>Статус</th>
+            <th>Метрики</th>
+            <th>Параметры</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for run in runs %}
+          <tr>
+            <td><code style="font-size:.82rem;">{{ run.run_id }}…</code></td>
+            <td>{{ run.experiment }}</td>
+            <td>
+              {% if run.status == 'FINISHED' %}
+                <span class="badge badge-ok">FINISHED</span>
+              {% elif run.status == 'RUNNING' %}
+                <span class="badge badge-run">RUNNING</span>
+              {% else %}
+                <span class="badge badge-fail">{{ run.status }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% for k, v in run.metrics.items() %}
+                <span class="metric-chip">{{ k }}: <strong>{{ v }}</strong></span>
+              {% endfor %}
+              {% if not run.metrics %}<span style="color:var(--muted); font-size:.82rem;">—</span>{% endif %}
+            </td>
+            <td>
+              {% for k, v in run.params.items() %}
+                <span class="metric-chip">{{ k }}: {{ v }}</span>
+              {% endfor %}
+              {% if not run.params %}<span style="color:var(--muted); font-size:.82rem;">—</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="icon"></div>
+      <div style="font-size:1rem; margin-bottom:.5rem;">Нет данных о запусках</div>
+      <div style="font-size:.88rem;">
+        MLflow tracking server недоступен или эксперименты ещё не проводились.<br>
+        Запустите: <code>make train-mlflow</code> или <code>make local-up && make train-mlflow</code>
+      </div>
+      <a href="{{ mlflow_url }}" target="_blank" class="btn btn-primary" style="margin-top:1rem;">
+        Открыть MLflow напрямую →
+      </a>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Quick reference -->
+  <div class="card">
+    <div class="section-title">Быстрые команды</div>
+    <div style="font-size:.88rem; line-height:1.8; color:var(--muted);">
+      <div><code>make train</code> — обучение без MLflow</div>
+      <div><code>make train-mlflow</code> — обучение + метрики и графики (ROC, PR, importance) в MLflow Artifacts → plots/</div>
+      <div><code>make drift-check CURRENT=data/incoming/batch.csv</code> — проверка дрейфа</div>
+      <div><code>make retrain</code> — переобучение через pipeline script</div>
+      <div><code>make docker-up</code> — запустить полный стек (API + MLflow + Prometheus + Grafana)</div>
+      <div><code>make minikube-deploy</code> — деплой в Kubernetes (minikube)</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

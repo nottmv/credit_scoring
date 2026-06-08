@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Credit Scoring — Инференс</title>
+  <style>
+    :root {
+      --primary: #1d3557; --accent: #e63946; --ok: #2a9d8f;
+      --bg: #f4f6fb; --card: #fff; --border: #e2e6ef; --muted: #6b7280;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: #1a1a2e; }
+    nav {
+      background: var(--primary); color: #fff;
+      display: flex; align-items: center;
+      padding: 0 1.5rem; height: 52px; gap: 1.5rem;
+      position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,.18);
+    }
+    nav .brand { font-weight: 700; font-size: 1.05rem; }
+    nav a { color: rgba(255,255,255,.78); text-decoration: none; font-size: .92rem;
+      padding: .25rem .5rem; border-radius: 4px; }
+    nav a:hover, nav a.active { background: rgba(255,255,255,.18); color: #fff; }
+    nav .spacer { flex: 1; }
+    nav .model-badge { background: rgba(255,255,255,.15); border-radius: 12px;
+      padding: .2rem .75rem; font-size: .8rem; }
+    .page { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; }
+    h1 { font-size: 1.4rem; color: var(--primary); margin-bottom: .5rem; }
+    p.sub { color: var(--muted); font-size: .9rem; margin-bottom: 1.5rem; }
+    .card { background: var(--card); border-radius: 10px; padding: 1.5rem;
+      box-shadow: 0 1px 4px rgba(0,0,0,.07); border: 1px solid var(--border); margin-bottom: 1rem; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media(max-width:600px) { .form-grid { grid-template-columns: 1fr; } }
+    .field { display: flex; flex-direction: column; gap: .3rem; }
+    label { font-size: .85rem; font-weight: 600; color: var(--primary); }
+    label .hint { font-weight: 400; color: var(--muted); font-size: .78rem; }
+    input[type=number], input[type=text] {
+      padding: .5rem .75rem; border: 1.5px solid var(--border);
+      border-radius: 6px; font-size: .9rem; width: 100%;
+      transition: border-color .15s;
+    }
+    input:focus { outline: none; border-color: var(--primary); }
+    .btn { display: inline-flex; align-items: center; gap: .4rem;
+      padding: .6rem 1.4rem; border-radius: 6px; font-size: .92rem;
+      font-weight: 600; cursor: pointer; border: none; transition: opacity .15s; }
+    .btn:hover { opacity: .87; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-outline { background: transparent; border: 1.5px solid var(--primary); color: var(--primary); }
+    .result-card { display: none; }
+    .result-card.show { display: block; }
+    .prob-display {
+      font-size: 3rem; font-weight: 800; line-height: 1;
+      margin: .5rem 0;
+    }
+    .prob-bar-bg { height: 12px; background: #e5e7eb; border-radius: 6px; overflow: hidden; margin: .75rem 0; }
+    .prob-bar { height: 100%; border-radius: 6px; transition: width .4s; }
+    .verdict { font-size: 1rem; font-weight: 600; padding: .4rem .9rem;
+      border-radius: 6px; display: inline-block; margin-top: .25rem; }
+    .verdict.high { background: #fee2e2; color: #c1121f; }
+    .verdict.mid  { background: #fef3c7; color: #92400e; }
+    .verdict.low  { background: #d1fae5; color: #065f46; }
+    .error-msg { background: #fee2e2; color: #c1121f; padding: .75rem 1rem;
+      border-radius: 6px; margin-top: .75rem; font-size: .9rem; display:none; }
+    .error-msg.show { display: block; }
+    .detail-row { display: flex; justify-content: space-between; font-size: .88rem;
+      padding: .3rem 0; border-bottom: 1px solid var(--border); }
+    .detail-row:last-child { border: none; }
+    .detail-row .key { color: var(--muted); }
+    .spinner { display:inline-block; width:16px; height:16px; border:2px solid #fff;
+      border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .tabs { display: flex; gap: .5rem; margin-bottom: 1rem; }
+    .tab-btn { padding: .4rem .9rem; border: 1.5px solid var(--border); border-radius: 6px;
+      background: #fff; cursor: pointer; font-size: .88rem; transition: all .15s; }
+    .tab-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="brand">Credit Scoring MLOps</span>
+  <a href="/dashboard">Мониторинг</a>
+  <a href="/ui/inference" class="active">Инференс</a>
+  <a href="/ui/experiments">Эксперименты</a>
+  <span class="spacer"></span>
+  <span class="model-badge">{{ model_type }}</span>
+</nav>
+
+<div class="page">
+  <h1>Инференс — оценка кредитного риска</h1>
+  <p class="sub">Заполните характеристики заёмщика и получите вероятность дефолта от модели {{ model_type }}.</p>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('form')">Форма</button>
+    <button class="tab-btn" onclick="switchTab('json')">JSON</button>
+  </div>
+
+  <!-- Form tab -->
+  <div class="tab-content active" id="tab-form">
+    <div class="card">
+      <form id="score-form" onsubmit="scoreForm(event)">
+        <div class="form-grid">
+          <div class="field">
+            <label>RevolvingUtilizationOfUnsecuredLines
+              <span class="hint">Доля использования револьверных кредитов (0–1+)</span>
+            </label>
+            <input type="number" step="0.01" name="RevolvingUtilizationOfUnsecuredLines" value="0.3" required>
+          </div>
+          <div class="field">
+            <label>Age <span class="hint">Возраст заёмщика</span></label>
+            <input type="number" name="age" value="45" required>
+          </div>
+          <div class="field">
+            <label>NumberOfTime30-59DaysPastDueNotWorse
+              <span class="hint">Просрочки 30–59 дней</span>
+            </label>
+            <input type="number" name="NumberOfTime30-59DaysPastDueNotWorse" value="0">
+          </div>
+          <div class="field">
+            <label>DebtRatio <span class="hint">Отношение долга к доходу</span></label>
+            <input type="number" step="0.01" name="DebtRatio" value="0.35">
+          </div>
+          <div class="field">
+            <label>MonthlyIncome <span class="hint">Ежемесячный доход</span></label>
+            <input type="number" name="MonthlyIncome" value="6000">
+          </div>
+          <div class="field">
+            <label>NumberOfOpenCreditLinesAndLoans
+              <span class="hint">Открытые кредитные линии</span>
+            </label>
+            <input type="number" name="NumberOfOpenCreditLinesAndLoans" value="8">
+          </div>
+          <div class="field">
+            <label>NumberOfTimes90DaysLate
+              <span class="hint">Просрочки 90+ дней</span>
+            </label>
+            <input type="number" name="NumberOfTimes90DaysLate" value="0">
+          </div>
+          <div class="field">
+            <label>NumberRealEstateLoansOrLines
+              <span class="hint">Ипотечные кредиты</span>
+            </label>
+            <input type="number" name="NumberRealEstateLoansOrLines" value="1">
+          </div>
+          <div class="field">
+            <label>NumberOfTime60-89DaysPastDueNotWorse
+              <span class="hint">Просрочки 60–89 дней</span>
+            </label>
+            <input type="number" name="NumberOfTime60-89DaysPastDueNotWorse" value="0">
+          </div>
+          <div class="field">
+            <label>NumberOfDependents <span class="hint">Иждивенцы</span></label>
+            <input type="number" name="NumberOfDependents" value="0">
+          </div>
+        </div>
+        <div style="margin-top:1.25rem; display:flex; gap:.75rem;">
+          <button type="submit" class="btn btn-primary" id="submit-btn">
+            Получить оценку
+          </button>
+          <button type="button" class="btn btn-outline" onclick="resetForm()">Сбросить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- JSON tab -->
+  <div class="tab-content" id="tab-json">
+    <div class="card">
+      <p style="font-size:.88rem; color:var(--muted); margin-bottom:.75rem;">
+        Вставьте JSON объект с полями модели:
+      </p>
+      <textarea id="json-input" rows="12"
+        style="width:100%; font-family:monospace; font-size:.85rem; padding:.75rem; border:1.5px solid var(--border); border-radius:6px;"
+        placeholder='{"RevolvingUtilizationOfUnsecuredLines": 0.3, "age": 45, ...}'
+      >{"RevolvingUtilizationOfUnsecuredLines": 0.3, "age": 45, "NumberOfTime30-59DaysPastDueNotWorse": 0, "DebtRatio": 0.35, "MonthlyIncome": 6000, "NumberOfOpenCreditLinesAndLoans": 8, "NumberOfTimes90DaysLate": 0, "NumberRealEstateLoansOrLines": 1, "NumberOfTime60-89DaysPastDueNotWorse": 0, "NumberOfDependents": 0}</textarea>
+      <button class="btn btn-primary" style="margin-top:.75rem;" onclick="scoreJSON()">
+        Получить оценку (JSON)
+      </button>
+    </div>
+  </div>
+
+  <!-- Result card -->
+  <div class="card result-card" id="result-card">
+    <h2 style="font-size:1rem; color:var(--muted); margin-bottom:.75rem;">Результат</h2>
+    <div class="prob-display" id="prob-display">—</div>
+    <div class="prob-bar-bg"><div class="prob-bar" id="prob-bar"></div></div>
+    <div id="verdict"></div>
+    <div style="margin-top:1.25rem;">
+      <div class="detail-row"><span class="key">Request ID</span><span id="req-id" style="font-family:monospace; font-size:.82rem;"></span></div>
+      <div class="detail-row"><span class="key">Модель</span><span id="model-type-r"></span></div>
+      <div class="detail-row"><span class="key">Аномалия (p≥0.8)</span><span id="anomaly-flag"></span></div>
+    </div>
+    <div style="margin-top:.75rem; font-size:.82rem; color:var(--muted);">
+      Вы можете отправить фидбек о реальном исходе:
+      <button class="btn btn-outline" style="padding:.25rem .7rem; font-size:.8rem; margin-left:.5rem;" onclick="sendFeedback(0)">Не дефолт</button>
+      <button class="btn btn-outline" style="padding:.25rem .7rem; font-size:.8rem; margin-left:.3rem; border-color:var(--accent); color:var(--accent);" onclick="sendFeedback(1)">Дефолт</button>
+    </div>
+  </div>
+
+  <div class="error-msg" id="error-msg"></div>
+</div>
+
+<script>
+let lastRequestId = null;
+
+function switchTab(t) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) =>
+    b.classList.toggle('active', (i===0 && t==='form') || (i===1 && t==='json')));
+  document.getElementById('tab-form').classList.toggle('active', t==='form');
+  document.getElementById('tab-json').classList.toggle('active', t==='json');
+}
+
+function resetForm() {
+  document.getElementById('score-form').reset();
+  document.getElementById('result-card').classList.remove('show');
+  document.getElementById('error-msg').classList.remove('show');
+}
+
+async function doScore(features) {
+  const btn = document.getElementById('submit-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Считаем...'; }
+  document.getElementById('error-msg').classList.remove('show');
+  try {
+    const resp = await fetch('/v1/score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ features })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showError(data.detail || JSON.stringify(data));
+      return;
+    }
+    showResult(data);
+  } catch(e) {
+    showError('Сетевая ошибка: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = 'Получить оценку'; }
+  }
+}
+
+async function scoreForm(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const features = {};
+  for (const [k, v] of fd.entries()) {
+    features[k] = isNaN(v) ? v : parseFloat(v);
+  }
+  await doScore(features);
+}
+
+async function scoreJSON() {
+  let features;
+  try { features = JSON.parse(document.getElementById('json-input').value); }
+  catch(e) { showError('Невалидный JSON: ' + e.message); return; }
+  await doScore(features);
+}
+
+function showResult(data) {
+  const p = data.probability;
+  lastRequestId = data.request_id;
+  document.getElementById('prob-display').textContent = (p * 100).toFixed(2) + '%';
+  document.getElementById('prob-display').style.color =
+    p >= 0.8 ? '#c1121f' : p >= 0.5 ? '#d97706' : '#059669';
+  const bar = document.getElementById('prob-bar');
+  bar.style.width = (p * 100) + '%';
+  bar.style.background = p >= 0.8 ? '#ef4444' : p >= 0.5 ? '#f59e0b' : '#10b981';
+  const verdict = document.getElementById('verdict');
+  if (p >= 0.8) {
+    verdict.innerHTML = '<span class="verdict high">Высокий риск — вероятен дефолт</span>';
+  } else if (p >= 0.5) {
+    verdict.innerHTML = '<span class="verdict mid">Средний риск — требует проверки</span>';
+  } else {
+    verdict.innerHTML = '<span class="verdict low">Низкий риск — кредит рекомендован</span>';
+  }
+  document.getElementById('req-id').textContent = data.request_id;
+  document.getElementById('model-type-r').textContent = data.model_type;
+  document.getElementById('anomaly-flag').textContent = data.anomaly ? 'Да' : '—';
+  document.getElementById('result-card').classList.add('show');
+  document.getElementById('result-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-msg');
+  el.textContent = 'Ошибка: ' + msg;
+  el.classList.add('show');
+}
+
+async function sendFeedback(yTrue) {
+  if (!lastRequestId) return;
+  const r = await fetch('/v1/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: lastRequestId, y_true: yTrue })
+  });
+  alert(r.ok ? 'Фидбек отправлен' : 'Ошибка отправки');
+}
+</script>
+</body>
+</html>

@@ -1,4 +1,7 @@
-.PHONY: clean data lint requirements sync_data_to_s3 sync_data_from_s3
+.PHONY: clean data lint requirements sync_data_to_s3 sync_data_from_s3 \
+	test fetch-data train train-mlflow drift-check retrain api local-up \
+	docker-build docker-build-mlflow docker-up docker-down docker-ps final-check final-check-docker \
+	k8s-images minikube-deploy
 
 #################################################################################
 # GLOBALS                                                                       #
@@ -36,7 +39,97 @@ clean:
 
 ## Lint using flake8
 lint:
-	flake8 src
+	flake8 --max-line-length=100 --extend-exclude=.dvc src tests scripts
+
+## Run unit tests
+test: requirements
+	$(PYTHON_INTERPRETER) -m pytest -q tests
+
+## Download data + models from Google Drive (requires gdown)
+fetch-data: requirements
+	$(PYTHON_INTERPRETER) -m pip install -q gdown
+	$(PYTHON_INTERPRETER) scripts/download_drive_artifacts.py
+
+## Train CatBoost (credit_scoring.csv или synthetic_min.csv)
+train: requirements
+	@if [ -f data/raw/credit_scoring.csv ]; then \
+		$(PYTHON_INTERPRETER) src/models/train_model.py --data data/raw/credit_scoring.csv --model-type catboost --save models/model_bundle_catboost.pkl; \
+	else \
+		echo ">>> data/raw/credit_scoring.csv нет — обучение на data/raw/synthetic_min.csv (make fetch-data для полного датасета)"; \
+		$(PYTHON_INTERPRETER) src/models/train_model.py --data data/raw/synthetic_min.csv --model-type catboost --save models/model_bundle_catboost.pkl; \
+	fi
+
+## То же + лог в MLflow (сервер :5000, см. make local-up). MLFLOW_URI=http://host:5000 make train-mlflow
+MLFLOW_URI ?= http://127.0.0.1:5000
+train-mlflow:
+	PYTHONPATH=. bash -c '\
+		if [ -f data/raw/credit_scoring.csv ]; then DATA=data/raw/credit_scoring.csv; \
+		else DATA=data/raw/synthetic_min.csv; fi && \
+		$(PYTHON_INTERPRETER) src/models/train_model.py --data $$DATA --model-type catboost \
+			--save models/model_bundle_catboost.pkl \
+			--mlflow-uri $(MLFLOW_URI) --mlflow-experiment credit_scoring \
+			--mlflow-register credit_scoring_catboost'
+
+## Drift report: make drift-check CURRENT=data/incoming/batch.csv
+drift-check: requirements
+	@test -n "$(CURRENT)" || (echo "Usage: make drift-check CURRENT=path/to/current.csv"; exit 1)
+	PYTHONPATH=. bash -c '\
+		if [ -f data/raw/credit_scoring.csv ]; then REF=data/raw/credit_scoring.csv; \
+		else REF=data/raw/synthetic_min.csv; fi && \
+		$(PYTHON_INTERPRETER) scripts/drift_check.py --reference $$REF --current $(CURRENT) --model-path models/model_bundle_catboost.pkl'
+
+## Retrain (optional MLflow: export MLFLOW_TRACKING_URI=...)
+retrain: requirements
+	@if [ -f data/raw/credit_scoring.csv ]; then \
+		$(PYTHON_INTERPRETER) scripts/retrain_pipeline.py --data data/raw/credit_scoring.csv --model-type catboost --save models/model_bundle_catboost.pkl; \
+	else \
+		$(PYTHON_INTERPRETER) scripts/retrain_pipeline.py --data data/raw/synthetic_min.csv --model-type catboost --save models/model_bundle_catboost.pkl; \
+	fi
+
+## FastAPI locally
+api: requirements
+	cd $(PROJECT_DIR) && PYTHONPATH=. MODEL_PATH=$(PROJECT_DIR)/models/model_bundle_catboost.pkl $(PYTHON_INTERPRETER) -m uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+
+## API + MLflow locally (no Docker); logs in /tmp/credit_scoring_*.log
+local-up: requirements
+	chmod +x scripts/start_local_stack.sh
+	test -f models/model_bundle_catboost.pkl || $(MAKE) train
+	./scripts/start_local_stack.sh
+
+## Docker images
+docker-build:
+	docker build -t credit-scoring-api:latest .
+
+docker-build-mlflow:
+	docker build -f docker/mlflow/Dockerfile -t credit-scoring-mlflow:latest .
+
+k8s-images: docker-build docker-build-mlflow
+
+## Docker Compose: нужен Docker Desktop / Colima + файл models/model_bundle_catboost.pkl
+docker-up:
+	@test -f models/model_bundle_catboost.pkl || (echo "Сначала: make train  или  make fetch-data && make train"; exit 1)
+	docker compose up --build -d
+
+docker-down:
+	docker compose down
+
+docker-ps:
+	docker compose ps
+
+## Финальная проверка (lint, тесты, docker compose config); без запуска контейнеров
+final-check:
+	chmod +x scripts/final_check.sh
+	./scripts/final_check.sh
+
+## То же + подъём docker compose и curl всех сервисов (порты подбираются, если 5000/8000 заняты)
+final-check-docker:
+	chmod +x scripts/final_check.sh
+	./scripts/final_check.sh --docker
+
+## Kubernetes (minikube): сборка образов в minikube docker + apply
+minikube-deploy:
+	chmod +x scripts/k8s_minikube.sh
+	./scripts/k8s_minikube.sh
 
 ## Upload Data to S3
 sync_data_to_s3:

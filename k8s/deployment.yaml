@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: credit-scoring-api
+  labels:
+    app: credit-scoring-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: credit-scoring-api
+  template:
+    metadata:
+      labels:
+        app: credit-scoring-api
+    spec:
+      containers:
+        - name: api
+          image: credit-scoring-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: MODEL_PATH
+              value: "/app/models/model_bundle_catboost.pkl"
+            - name: EVENTS_JSONL_PATH
+              value: "/app/reports/events.jsonl"
+            - name: DRIFT_REPORT_PATH
+              value: "/app/reports/last_drift.json"
+            - name: CHAMPION_METRICS_PATH
+              value: "/app/reports/champion_metrics.json"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 25
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          volumeMounts:
+            - name: model
+              mountPath: /app/models
+              readOnly: true
+            - name: reports
+              mountPath: /app/reports
+      volumes:
+        - name: model
+          hostPath:
+            path: /tmp/credit-models
+            type: DirectoryOrCreate
+        - name: reports
+          emptyDir: {}
