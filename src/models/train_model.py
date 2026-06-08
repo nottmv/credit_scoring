@@ -415,16 +415,27 @@ def train_catboost(
     neg = float(np.sum(y_train == 0))
     class_weights = [1.0, (neg / pos) if pos > 0 else 1.0]
 
+    n_train = len(X_train)
+    # На маленьких выборках (synthetic_min) снижаем регуляризацию — иначе все скоры ~50%
+    if n_train < 5000:
+        depth = 4
+        min_data_in_leaf = max(15, n_train // 20)
+        l2_leaf_reg = 10.0
+    else:
+        depth = 1
+        min_data_in_leaf = 500
+        l2_leaf_reg = 120.0
+
     model = CatBoostClassifier(
         iterations=5000,
-        depth=1,
+        depth=depth,
         learning_rate=0.015,
-        l2_leaf_reg=120,
+        l2_leaf_reg=l2_leaf_reg,
         random_strength=10.0,
         bagging_temperature=2.0,
         rsm=0.5,
         subsample=0.6,
-        min_data_in_leaf=500,
+        min_data_in_leaf=min_data_in_leaf,
         class_weights=class_weights,
         loss_function="Logloss",
         eval_metric="AUC",
@@ -502,7 +513,21 @@ def _overfit_report(metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def normalize_raw_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Map common API aliases to training CSV column names."""
+    df = df.copy()
+    aliases = {
+        "age": "Age",
+    }
+    for src, dst in aliases.items():
+        if src in df.columns and dst not in df.columns:
+            df[dst] = df[src]
+            df = df.drop(columns=[src])
+    return df
+
+
 def build_features_for_training(df_raw, fit_params=None):
+    df_raw = normalize_raw_columns(df_raw)
     df, new_params = preprocess_data(df_raw, fit_params)
     df = add_features(df)
     df = select_model_columns(df)

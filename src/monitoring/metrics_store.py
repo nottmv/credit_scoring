@@ -114,7 +114,7 @@ def summarize_events(path: Optional[Path] = None, max_lines: int = 8000) -> Dict
             paired_y.append(y)
 
     prod_auc = None
-    if len(set(paired_y)) > 1 and len(paired_y) >= 5:
+    if len(set(paired_y)) > 1 and len(paired_y) >= 2:
         from sklearn.metrics import roc_auc_score
 
         prod_auc = float(roc_auc_score(paired_y, paired_p))

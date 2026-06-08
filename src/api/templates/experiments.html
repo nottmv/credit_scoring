@@ -107,7 +107,7 @@
   <div class="card">
     <div class="section-title" style="display:flex; align-items:center; justify-content:space-between;">
       <span>Последние запуски обучения</span>
-      <a href="{{ mlflow_url }}" target="_blank" class="btn btn-primary">Открыть MLflow →</a>
+      <a href="{{ mlflow_url }}" target="_blank" class="btn btn-primary">Открыть MLflow</a>
     </div>
     {% if runs %}
     <div style="overflow-x:auto;">
@@ -161,7 +161,7 @@
         Запустите: <code>make train-mlflow</code> или <code>make local-up && make train-mlflow</code>
       </div>
       <a href="{{ mlflow_url }}" target="_blank" class="btn btn-primary" style="margin-top:1rem;">
-        Открыть MLflow напрямую →
+        Открыть MLflow напрямую
       </a>
     </div>
     {% endif %}
@@ -172,7 +172,7 @@
     <div class="section-title">Быстрые команды</div>
     <div style="font-size:.88rem; line-height:1.8; color:var(--muted);">
       <div><code>make train</code> — обучение без MLflow</div>
-      <div><code>make train-mlflow</code> — обучение + метрики и графики (ROC, PR, importance) в MLflow Artifacts → plots/</div>
+      <div><code>make train-mlflow</code> — обучение + метрики и графики (ROC, PR, importance) в MLflow Artifacts / plots/</div>
       <div><code>make drift-check CURRENT=data/incoming/batch.csv</code> — проверка дрейфа</div>
       <div><code>make retrain</code> — переобучение через pipeline script</div>
       <div><code>make docker-up</code> — запустить полный стек (API + MLflow + Prometheus + Grafana)</div>

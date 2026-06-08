@@ -367,6 +367,10 @@ def dashboard(request: Request) -> Any:
             })
     predictions = predictions[-100:][::-1]
     drift_alert = bool(drift and drift.get("degraded"))
+    offline_auc = None
+    if champion and champion.get("models"):
+        first = next(iter(champion["models"].values()), {})
+        offline_auc = first.get("validation_roc_auc")
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -378,6 +382,9 @@ def dashboard(request: Request) -> Any:
             "drift_alert": drift_alert,
             "retrain_status": _retrain_status,
             "model_type": _bundle.model_type if _bundle else "unknown",
+            "offline_auc": offline_auc,
+            "prometheus_url": os.environ.get("PROMETHEUS_UI_URL", "http://localhost:9090"),
+            "grafana_url": os.environ.get("GRAFANA_UI_URL", "http://localhost:3000"),
         },
     )
 

@@ -26,7 +26,7 @@ def _make_mock_bundle() -> MagicMock:
     """Create a minimal ModelBundle mock that returns fixed predictions."""
     bundle = MagicMock()
     bundle.model_type = "catboost"
-    bundle.feature_cols = ["RevolvingUtilizationOfUnsecuredLines", "age", "DebtRatio"]
+    bundle.feature_cols = ["RevolvingUtilizationOfUnsecuredLines", "Age", "DebtRatio"]
     bundle.preprocessing_params = {"medians": {}, "quantiles": {}}
     bundle.config = {"target_col": "Delinquent90"}
 
@@ -61,7 +61,7 @@ def api_client(tmp_path: Path, mock_bundle: MagicMock) -> Generator:
             return_value=(
                 pd.DataFrame(
                     [[0.3, 45, 0.35]],
-                    columns=["RevolvingUtilizationOfUnsecuredLines", "age", "DebtRatio"],
+                    columns=["RevolvingUtilizationOfUnsecuredLines", "Age", "DebtRatio"],
                 ),
                 {},
             ),
@@ -77,7 +77,7 @@ def api_client(tmp_path: Path, mock_bundle: MagicMock) -> Generator:
 def sample_features() -> dict:
     return {
         "RevolvingUtilizationOfUnsecuredLines": 0.3,
-        "age": 45,
+        "Age": 45,
         "NumberOfTime30-59DaysPastDueNotWorse": 0,
         "DebtRatio": 0.35,
         "MonthlyIncome": 6000,

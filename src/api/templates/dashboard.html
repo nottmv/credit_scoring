@@ -239,9 +239,23 @@
     <div class="card">
       <h2>Production AUC</h2>
       <div class="stat-value {% if summary.production_roc_auc and summary.production_roc_auc < 0.65 %}bad{% endif %}">
-        {{ "%.4f"|format(summary.production_roc_auc) if summary.production_roc_auc else "—" }}
+        {% if summary.production_roc_auc %}
+          {{ "%.4f"|format(summary.production_roc_auc) }}
+        {% elif offline_auc %}
+          {{ "%.4f"|format(offline_auc) }}
+        {% else %}
+          —
+        {% endif %}
       </div>
-      <div class="stat-label">по {{ summary.n_pairs_for_auc or 0 }} парам с фидбеком</div>
+      <div class="stat-label">
+        {% if summary.production_roc_auc %}
+          online: {{ summary.n_pairs_for_auc or 0 }} пар score + feedback
+        {% elif offline_auc %}
+          offline validation (нет feedback — отправьте на странице Инференс)
+        {% else %}
+          нужен feedback после скоринга (мин. 2 пары, оба класса)
+        {% endif %}
+      </div>
     </div>
     <div class="card">
       <h2>Latency p95</h2>
@@ -277,8 +291,9 @@
         </div>
         <div style="margin-left:auto; font-size:.85rem; color: var(--muted);">
           <a href="/docs" class="link">OpenAPI</a> &nbsp;|&nbsp;
-          <a href="/metrics" class="link">Prometheus</a> &nbsp;|&nbsp;
-          <a href="http://localhost:3000" class="link" target="_blank">Grafana</a>
+          <a href="/metrics" class="link">/metrics</a> &nbsp;|&nbsp;
+          <a href="{{ prometheus_url }}" class="link" target="_blank">Prometheus</a> &nbsp;|&nbsp;
+          <a href="{{ grafana_url }}" class="link" target="_blank">Grafana</a>
         </div>
       </div>
     </div>

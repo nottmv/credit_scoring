@@ -9,9 +9,15 @@ services:
       ADMIN_RELOAD_TOKEN: ${ADMIN_RELOAD_TOKEN:-dev-token-change-me}
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_UI_URL: http://localhost:${MLFLOW_HOST_PORT:-5001}
+      PROMETHEUS_UI_URL: http://localhost:${PROMETHEUS_HOST_PORT:-9090}
+      GRAFANA_UI_URL: http://localhost:${GRAFANA_HOST_PORT:-3000}
+      DRIFT_REPORT_PATH: /app/reports/last_drift.json
+      CHAMPION_METRICS_PATH: /app/reports/champion_metrics.json
+      EVENTS_JSONL_PATH: /app/reports/events.jsonl
     volumes:
       - ./models:/app/models:ro
-      - scoring_reports:/app/reports
+      - ./reports:/app/reports
+      - ./src:/app/src:ro
     depends_on:
       mlflow:
         condition: service_healthy
@@ -81,4 +87,3 @@ services:
 
 volumes:
   mlflow_data:
-  scoring_reports:
