@@ -10,14 +10,13 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-import pandas as pd
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from src.models.train_model import ModelBundle, build_features_for_training
+from src.models.predict_model import load_bundle as load_model_bundle, predict_proba
+from src.models.train_model import ModelBundle
 from src.monitoring import prometheus_metrics as prom_metrics
 from src.monitoring.drift import load_drift_report
 from src.monitoring.metrics_store import (
@@ -61,7 +60,7 @@ def load_bundle() -> ModelBundle:
     path = model_path()
     if not Path(path).is_file():
         raise FileNotFoundError(f"Model bundle not found: {path}")
-    return ModelBundle.load(path)
+    return load_model_bundle(path)
 
 
 def reload_bundle() -> None:
@@ -153,19 +152,11 @@ def score_one(body: ScoreRequest) -> ScoreResponse:
         raise HTTPException(status_code=503, detail="Model not loaded")
     rid = new_request_id()
     t0 = time.perf_counter()
-    df = pd.DataFrame([body.features])
-    target = _bundle.config.get("target_col")
-    if target and target in df.columns:
-        df = df.drop(columns=[target])
     try:
-        df_feat, _ = build_features_for_training(
-            df, fit_params=_bundle.preprocessing_params
-        )
+        proba = float(predict_proba(_bundle, body.features)[0])
     except Exception as e:
         prom_metrics.observe_score_error()
         raise HTTPException(status_code=400, detail=f"Feature build failed: {e}") from e
-    df_feat = df_feat.reindex(columns=_bundle.feature_cols, fill_value=0)
-    proba = float(_bundle.model.predict_proba(df_feat)[:, 1][0])
     ms = (time.perf_counter() - t0) * 1000
     anomaly = proba >= 0.8
     prom_metrics.observe_score_ok(ms / 1000.0, proba)

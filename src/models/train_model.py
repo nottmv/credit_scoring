@@ -1,3 +1,7 @@
+"""Training and MLflow logging for credit scoring models."""
+
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -12,6 +16,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 
+from src.models.shared import (
+    CLIENT_ID_COL,
+    TARGET,
+    build_features,
+)
+
 try:
     import scorecardpy as sc
 except Exception:
@@ -23,8 +33,6 @@ except Exception:
     CatBoostClassifier = None
 
 
-TARGET = "Delinquent90"
-CLIENT_ID_COL = "client_id"
 RANDOM_STATE = 42
 TIME_COL_CANDIDATES = ["snapshot_date", "report_date", "as_of_date", "date", "dt"]
 
@@ -101,13 +109,13 @@ def _deserialize_model(model_type: str, payload: Any) -> Any:
     raise ValueError("Unknown model payload kind")
 
 
-def load_data(path):
+def load_data(path: str | Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     print(f"Loaded dataset: {df.shape}")
     return df
 
 
-def basic_eda(df):
+def basic_eda(df: pd.DataFrame) -> None:
     print("\nDataset info:")
     print(df.info())
 
@@ -117,149 +125,6 @@ def basic_eda(df):
     print("\nTarget distribution:")
     print(df[TARGET].value_counts(dropna=False))
     print(df[TARGET].value_counts(normalize=True, dropna=False))
-
-
-def preprocess_data(df, fit_params=None):
-    df = df.copy()
-
-    if "Unnamed: 0" in df.columns:
-        df = df.drop(columns=["Unnamed: 0"])
-
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    if TARGET in numeric_cols:
-        numeric_cols.remove(TARGET)
-
-    if fit_params is None:
-        # Режим обучения: вычисляем медианы и границы клиппинга
-        medians = {}
-        quantiles = {}
-        for col in numeric_cols:
-            # Замена inf
-            col_clean = df[col].replace([np.inf, -np.inf], np.nan)
-            q01 = col_clean.quantile(0.01)
-            q99 = col_clean.quantile(0.99)
-            if pd.notna(q01) and pd.notna(q99):
-                quantiles[col] = (q01, q99)
-            else:
-                quantiles[col] = (np.nan, np.nan)
-            med = col_clean.median()
-            medians[col] = med if pd.notna(med) else 0.0
-        fit_params = {'medians': medians, 'quantiles': quantiles}
-    else:
-        medians = fit_params['medians']
-        quantiles = fit_params['quantiles']
-
-    # Применяем преобразования
-    for col in numeric_cols:
-        # Замена inf
-        df[col] = df[col].replace([np.inf, -np.inf], np.nan)
-        # Клиппинг
-        q01, q99 = quantiles.get(col, (np.nan, np.nan))
-        if pd.notna(q01) and pd.notna(q99):
-            df[col] = df[col].clip(q01, q99)
-        # Заполнение пропусков
-        median_val = medians.get(col, 0.0)
-        df[col] = df[col].fillna(median_val)
-
-    # Объектные колонки – без изменений (заполняем "missing")
-    object_cols = df.select_dtypes(include=["object"]).columns.tolist()
-    for col in object_cols:
-        df[col] = df[col].fillna("missing")
-
-    return df, fit_params
-
-
-def add_features(df):
-    df = df.copy()
-
-    if (
-        "NumberOfTime30-59DaysPastDueNotWorse" in df.columns
-        and "NumberOfTime60-89DaysPastDueNotWorse" in df.columns
-        and "NumberOfTimes90DaysLate" in df.columns
-    ):
-
-        df["total_past_due"] = (
-            df["NumberOfTime30-59DaysPastDueNotWorse"]
-            + df["NumberOfTime60-89DaysPastDueNotWorse"]
-            + df["NumberOfTimes90DaysLate"]
-        )
-
-        df["any_past_due_flag"] = (df["total_past_due"] > 0).astype(int)
-        df["severe_past_due_flag"] = (df["NumberOfTimes90DaysLate"] > 0).astype(int)
-
-    if "RevolvingUtilizationOfUnsecuredLines" in df.columns:
-        df["high_util_flag"] = (
-            df["RevolvingUtilizationOfUnsecuredLines"] > 0.8
-        ).astype(int)
-
-        df["very_high_util_flag"] = (
-            df["RevolvingUtilizationOfUnsecuredLines"] > 1.0
-        ).astype(int)
-
-        df["log_revolving_util"] = np.log1p(
-            np.clip(df["RevolvingUtilizationOfUnsecuredLines"], a_min=0, a_max=None)
-        )
-
-    if "DebtRatio" in df.columns and "MonthlyIncome" in df.columns:
-        df["debt_income_ratio"] = df["DebtRatio"] * df["MonthlyIncome"]
-        df["utilization_times_debt"] = df["DebtRatio"]
-
-        if "RevolvingUtilizationOfUnsecuredLines" in df.columns:
-            df["utilization_times_debt"] = (
-                df["RevolvingUtilizationOfUnsecuredLines"] * df["DebtRatio"]
-            )
-
-        df["log_income"] = np.log1p(np.clip(df["MonthlyIncome"], a_min=0, a_max=None))
-        df["log_debt_ratio"] = np.log1p(np.clip(df["DebtRatio"], a_min=0, a_max=None))
-        df["income_is_missing_flag"] = (df["MonthlyIncome"] <= 0).astype(int)
-
-    if "MonthlyIncome" in df.columns and "NumberOfDependents" in df.columns:
-        df["income_per_person"] = df["MonthlyIncome"] / (df["NumberOfDependents"] + 1)
-        df["has_dependents_flag"] = (df["NumberOfDependents"] > 0).astype(int)
-
-    if "NumberOfOpenCreditLinesAndLoans" in df.columns and "DebtRatio" in df.columns:
-        df["debt_per_loan"] = df["DebtRatio"] / (
-            df["NumberOfOpenCreditLinesAndLoans"] + 1
-        )
-        df["many_trade_lines_flag"] = (
-            df["NumberOfOpenCreditLinesAndLoans"] >= 10
-        ).astype(int)
-
-    if (
-        "NumberRealEstateLoansOrLines" in df.columns
-        and "NumberOfOpenCreditLinesAndLoans" in df.columns
-    ):
-        df["real_estate_share"] = df["NumberRealEstateLoansOrLines"] / (
-            df["NumberOfOpenCreditLinesAndLoans"] + 1
-        )
-
-        df["has_real_estate_flag"] = (df["NumberRealEstateLoansOrLines"] > 0).astype(
-            int
-        )
-
-    if "Age" in df.columns:
-        df["age_squared"] = df["Age"] ** 2
-        df["young_borrower_flag"] = (df["Age"] < 30).astype(int)
-        df["senior_borrower_flag"] = (df["Age"] >= 60).astype(int)
-
-    return df
-
-
-def select_model_columns(df):
-    df = df.copy()
-
-    drop_cols = []
-
-    if CLIENT_ID_COL in df.columns:
-        drop_cols.append(CLIENT_ID_COL)
-
-    object_cols = df.select_dtypes(include=["object"]).columns.tolist()
-    drop_cols.extend(object_cols)
-
-    drop_cols = list(set(drop_cols))
-    usable_cols = [col for col in df.columns if col not in drop_cols]
-
-    return df[usable_cols]
 
 
 def _detect_time_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
@@ -339,7 +204,7 @@ def split_data_3way(
     return X_train, X_test, X_val, y_train, y_test, y_val
 
 
-def evaluate_model(model, X, y, dataset_name="dataset"):
+def evaluate_model(model: Any, X: pd.DataFrame, y: pd.Series, dataset_name: str = "dataset"):
     proba = model.predict_proba(X)[:, 1]
     auc = roc_auc_score(y, proba)
     gini = 2 * auc - 1
@@ -370,7 +235,6 @@ class XGBBoosterWrapper:
 def train_xgboost(
     X_train: pd.DataFrame, y_train: pd.Series, X_eval: pd.DataFrame, y_eval: pd.Series
 ):
-
     import xgboost as xgb
 
     dtrain = xgb.DMatrix(X_train, label=y_train)
@@ -410,13 +274,11 @@ def train_xgboost(
 def train_catboost(
     X_train: pd.DataFrame, y_train: pd.Series, X_eval: pd.DataFrame, y_eval: pd.Series
 ):
-
     pos = float(np.sum(y_train == 1))
     neg = float(np.sum(y_train == 0))
     class_weights = [1.0, (neg / pos) if pos > 0 else 1.0]
 
     n_train = len(X_train)
-    # На маленьких выборках (synthetic_min) снижаем регуляризацию — иначе все скоры ~50%
     if n_train < 5000:
         depth = 4
         min_data_in_leaf = max(15, n_train // 20)
@@ -449,7 +311,7 @@ def train_catboost(
     return model
 
 
-def train_logreg_woe(df_train):
+def train_logreg_woe(df_train: pd.DataFrame):
     if sc is None:
         raise RuntimeError("scorecardpy is not available; cannot train WOE model")
     bins = sc.woebin(df_train, y=TARGET)
@@ -464,33 +326,15 @@ def train_logreg_woe(df_train):
     return model, bins
 
 
-def transform_woe(df, bins):
+def transform_woe(df: pd.DataFrame, bins: Any):
     df_woe = sc.woebin_ply(df, bins)
     X_woe = df_woe.drop(columns=[TARGET], errors="ignore")
     return X_woe
 
 
-def save_model(model, path):
+def save_model(model: Any, path: Union[str, Path]) -> None:
     joblib.dump(model, path)
     print(f"Model saved to {path}")
-
-
-def predict_by_client_id(bundle: ModelBundle, df_raw, client_id):
-    if CLIENT_ID_COL not in df_raw.columns:
-        raise ValueError(f"Column {CLIENT_ID_COL} not found in dataset")
-
-    row = df_raw[df_raw[CLIENT_ID_COL] == client_id].copy()
-    if row.empty:
-        raise ValueError("Client not found")
-
-    row, _ = build_features_for_training(row, fit_params=bundle.preprocessing_params)
-    if bundle.config.get("target_col") in row.columns:
-        row = row.drop(columns=[bundle.config["target_col"]])
-    row = row.reindex(columns=bundle.feature_cols, fill_value=0)
-
-    proba = bundle.model.predict_proba(row)[:, 1][0]
-
-    return {"client_id": client_id, "probability": float(proba)}
 
 
 def _overfit_report(metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -513,39 +357,18 @@ def _overfit_report(metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def normalize_raw_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Map common API aliases to training CSV column names."""
-    df = df.copy()
-    aliases = {
-        "age": "Age",
-    }
-    for src, dst in aliases.items():
-        if src in df.columns and dst not in df.columns:
-            df[dst] = df[src]
-            df = df.drop(columns=[src])
-    return df
-
-
-def build_features_for_training(df_raw, fit_params=None):
-    df_raw = normalize_raw_columns(df_raw)
-    df, new_params = preprocess_data(df_raw, fit_params)
-    df = add_features(df)
-    df = select_model_columns(df)
-    return df, new_params
-
-
 def train_and_evaluate(
     df_raw: pd.DataFrame,
     cfg: TrainConfig,
     model_type: str,
 ) -> Tuple[ModelBundle, Dict[str, Any], Dict[str, Tuple[pd.DataFrame, pd.Series]]]:
-    X_train_raw, X_test_raw, X_val_raw, y_train, y_test, y_val = (
-        split_data_3way(df_raw, cfg)
+    X_train_raw, X_test_raw, X_val_raw, y_train, y_test, y_val = split_data_3way(
+        df_raw, cfg
     )
 
-    X_train, fit_params = build_features_for_training(X_train_raw, fit_params=None)
-    X_test, _ = build_features_for_training(X_test_raw, fit_params=fit_params)
-    X_val, _ = build_features_for_training(X_val_raw, fit_params=fit_params)
+    X_train, fit_params = build_features(X_train_raw, fit_params=None)
+    X_test, _ = build_features(X_test_raw, fit_params=fit_params)
+    X_val, _ = build_features(X_val_raw, fit_params=fit_params)
 
     feature_cols = X_train.columns.tolist()
     X_test = X_test[feature_cols]
@@ -585,32 +408,6 @@ def train_and_evaluate(
         config=asdict(cfg),
     )
     return bundle, report, eval_sets
-
-
-def score_client_id(
-    bundle: ModelBundle, df_raw: pd.DataFrame, client_id: Any
-) -> Dict[str, Any]:
-
-    model = bundle.model
-
-    if CLIENT_ID_COL not in df_raw.columns:
-        raise ValueError(f"Column {CLIENT_ID_COL} not found in dataset")
-
-    row = df_raw[df_raw[CLIENT_ID_COL] == client_id].copy()
-    if row.empty:
-        raise ValueError("Client not found")
-
-    row, _ = build_features_for_training(row, fit_params=bundle.preprocessing_params)
-    if bundle.config.get("target_col") in row.columns:
-        row = row.drop(columns=[bundle.config["target_col"]])
-    row = row.reindex(columns=bundle.feature_cols, fill_value=0)
-    proba = float(model.predict_proba(row)[:, 1][0])
-
-    try:
-        client_id_out = client_id.item()
-    except Exception:
-        client_id_out = client_id
-    return {"client_id": client_id_out, "probability": proba}
 
 
 def write_champion_metrics(report: Dict[str, Any], path: Union[str, Path]) -> None:
@@ -697,7 +494,7 @@ def log_mlflow_run(
         )
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="data/raw/credit_scoring.csv")
     parser.add_argument(
@@ -711,11 +508,6 @@ def main():
         help="Optional time column for prod-like validation split",
     )
     parser.add_argument("--save", default="models/model_bundle.pkl")
-    parser.add_argument(
-        "--score-client-id",
-        default=None,
-        help="If set, outputs probability for this id",
-    )
     parser.add_argument(
         "--mlflow-uri",
         default=os.environ.get("MLFLOW_TRACKING_URI"),
@@ -743,15 +535,11 @@ def main():
     basic_eda(df_raw)
 
     save_path = Path(args.save)
-    model_types = (
-        ["catboost", "xgboost"] if args.model_type == "both" else [args.model_type]
-    )
+    model_types = ["catboost", "xgboost"] if args.model_type == "both" else [args.model_type]
 
-    bundles: Dict[str, ModelBundle] = {}
     for mt in model_types:
         print(f"\n=== Training: {mt} ===")
         bundle, report, eval_sets = train_and_evaluate(df_raw, cfg, mt)
-        bundles[mt] = bundle
 
         out_path = save_path
         if args.model_type == "both":
@@ -779,13 +567,6 @@ def main():
                 args.mlflow_register,
             )
             print(f"\nMLflow: logged run to {args.mlflow_uri}")
-
-    if args.score_client_id is not None:
-        client_id = type(df_raw[CLIENT_ID_COL].iloc[0])(args.score_client_id)
-        for mt, bundle in bundles.items():
-            result = score_client_id(bundle, df_raw, client_id)
-            print(f"\nScore result ({mt}):")
-            print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

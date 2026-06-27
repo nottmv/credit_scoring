@@ -15,8 +15,8 @@ from src.models.train_model import (
     CLIENT_ID_COL,
     TARGET,
     ModelBundle,
-    build_features_for_training,
 )
+from src.models.shared import build_features
 
 # --- PSI (population stability) ---
 
@@ -235,7 +235,7 @@ def _scores_for_frame(bundle: ModelBundle, df_raw: pd.DataFrame) -> np.ndarray:
         df_fit = df.drop(columns=[target])
     else:
         df_fit = df
-    X, _ = build_features_for_training(df_fit, fit_params=bundle.preprocessing_params)
+    X, _ = build_features(df_fit, fit_params=bundle.preprocessing_params)
     X = X.reindex(columns=bundle.feature_cols, fill_value=0)
     return bundle.model.predict_proba(X)[:, 1]
 

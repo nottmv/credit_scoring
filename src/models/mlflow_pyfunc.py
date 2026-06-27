@@ -8,7 +8,8 @@ import mlflow.pyfunc
 import numpy as np
 import pandas as pd
 
-from src.models.train_model import ModelBundle, build_features_for_training
+from src.models.predict_model import predict_proba
+from src.models.train_model import ModelBundle
 
 
 class CreditBundleModel(mlflow.pyfunc.PythonModel):
@@ -20,22 +21,7 @@ class CreditBundleModel(mlflow.pyfunc.PythonModel):
         context: mlflow.pyfunc.PythonModelContext,
         model_input: Union[pd.DataFrame, List[Dict[str, Any]], Dict[str, Any]],
     ) -> np.ndarray:
-        if isinstance(model_input, dict):
-            df = pd.DataFrame([model_input])
-        elif isinstance(model_input, list):
-            df = pd.DataFrame(model_input)
-        else:
-            df = model_input.copy()
-
-        target = self.bundle.config.get("target_col")
-        if target and target in df.columns:
-            df = df.drop(columns=[target])
-
-        df_feat, _ = build_features_for_training(
-            df, fit_params=self.bundle.preprocessing_params
-        )
-        df_feat = df_feat.reindex(columns=self.bundle.feature_cols, fill_value=0)
-        return self.bundle.model.predict_proba(df_feat)[:, 1]
+        return predict_proba(self.bundle, model_input)
 
 
 def log_pyfunc_model(
