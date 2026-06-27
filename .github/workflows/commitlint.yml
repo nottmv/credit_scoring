@@ -1,0 +1,14 @@
+name: Conventional Commits Check
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  commit-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Validate commits
+        run: |
+          git log origin/master..HEAD --oneline | grep -vE '^(feat|fix|docs|style|refactor|test|chore|ci)(\(.+\))?:' && exit 1 || exit 0

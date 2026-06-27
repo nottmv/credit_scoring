@@ -52,6 +52,7 @@ credit_scoring/
 │           └── credit_scoring.json  # Grafana dashboard (9 панелей)
 ├── .github/workflows/
 │   ├── ci.yml                       # lint → test → docker build → deploy
+│   ├── commitlint.yml               # Проверка формата коммитов (Conventional Commits) при Pull Request
 │   └── retrain-dispatch.yml         # Ручной запуск переобучения через Actions
 ├── docker/mlflow/Dockerfile         # MLflow tracking server image
 ├── Dockerfile                       # API image (python 3.11-slim)
