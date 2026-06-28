@@ -62,7 +62,7 @@ def test_score_anomaly_flag_high(tmp_path: Path, sample_features: dict) -> None:
         patch("src.api.main._bundle", bundle),
         patch("src.api.main.EVENTS_PATH", tmp_path / "e.jsonl"),
         patch(
-            "src.models.train_model.build_features_for_training",
+            "src.models.shared.build_features",
             return_value=(pd.DataFrame([[0.3, 45, 0.35]], columns=bundle.feature_cols), {}),
         ),
     ):

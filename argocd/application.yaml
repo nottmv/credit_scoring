@@ -10,7 +10,7 @@ spec:
 
   source:
     repoURL: https://github.com/nottmv/credit_scoring.git
-    targetRevision: HEAD
+    targetRevision: master
     path: k8s
 
   destination:
@@ -23,7 +23,6 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      - ApplyOutOfSyncOnly=true
     retry:
       limit: 3
       backoff:
@@ -31,7 +30,6 @@ spec:
         factor: 2
         maxDuration: 2m
 
-  # Health checks for all resources in k8s/
   ignoreDifferences:
     - group: apps
       kind: Deployment

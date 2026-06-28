@@ -57,7 +57,7 @@ def api_client(tmp_path: Path, mock_bundle: MagicMock) -> Generator:
         patch("src.api.main.DRIFT_PATH", drift_path),
         patch("src.api.main.CHAMPION_PATH", champion_path),
         patch(
-            "src.models.train_model.build_features_for_training",
+            "src.models.shared.build_features",
             return_value=(
                 pd.DataFrame(
                     [[0.3, 45, 0.35]],
