@@ -1,6 +1,3 @@
-# local package
--e .
-
 # Core
 PyYAML>=6.0.1
 click
