@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.models.train_model import normalize_raw_columns
+from src.models.shared import normalize_raw_columns
 
 
 def test_age_alias_mapped_to_Age():
