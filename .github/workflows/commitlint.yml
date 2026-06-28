@@ -11,4 +11,4 @@ jobs:
           fetch-depth: 0
       - name: Validate commits
         run: |
-          git log origin/master..HEAD --oneline | grep -vE '^(feat|fix|docs|style|refactor|test|chore|ci)(\(.+\))?:' && exit 1 || exit 0
+          git log --no-merges origin/master..HEAD --format=%s | grep -vE '^(feat|fix|docs|style|refactor|test|chore|ci)(\(.+\))?:' && exit 1 || exit 0

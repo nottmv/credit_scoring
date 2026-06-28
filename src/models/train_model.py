@@ -493,6 +493,18 @@ def log_mlflow_run(
             input_example=input_example,
         )
 
+        if register_name:
+            client = mlflow.tracking.MlflowClient()
+            registered_models = client.search_model_versions(f"name='{register_name}'")
+            if registered_models:
+                latest_version = max(int(v.version) for v in registered_models)
+                client.transition_model_version_stage(
+                    name=register_name,
+                    version=latest_version,
+                    stage="Staging"
+                )
+                print(f"Model {register_name} version {latest_version} promoted to Staging")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -519,8 +531,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--mlflow-register",
-        default=None,
-        help="Optional Model Registry name",
+        default="credit_scoring_model",
+        help="Model Registry name (staging promotion enabled by default)",
     )
     parser.add_argument(
         "--champion-report",
