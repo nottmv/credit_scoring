@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 import mlflow
 from src.models.predict_model import load_bundle as load_model_bundle, predict_proba
-#from src.models.train_model import ModelBundle
+# from src.models.train_model import ModelBundle
 from src.monitoring import prometheus_metrics as prom_metrics
 from src.monitoring.drift import load_drift_report
 from src.monitoring.metrics_store import (
@@ -461,4 +461,3 @@ def ui_experiments(request: Request) -> Any:
             "mlflow_url": mlflow_ui,
         },
     )
-
