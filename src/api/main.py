@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+import mlflow
 from src.models.predict_model import load_bundle as load_model_bundle, predict_proba
 from src.models.train_model import ModelBundle
 from src.monitoring import prometheus_metrics as prom_metrics
@@ -27,7 +28,7 @@ from src.monitoring.metrics_store import (
     summarize_events,
 )
 
-_bundle: Optional[ModelBundle] = None
+_bundle: Optional[Any] = None
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -44,6 +45,30 @@ _retrain_task: Optional[asyncio.Task] = None
 _retrain_status: Dict[str, Any] = {"state": "idle", "started_at": None, "finished_at": None}
 
 
+def _load_from_registry() -> Optional[Any]:
+    """Try to load model from MLflow Registry, return pyfunc model or None."""
+    registry_uri = os.environ.get("MLFLOW_MODEL_URI")
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if not registry_uri and not tracking_uri:
+        return None
+    try:
+        if registry_uri:
+            uri = registry_uri
+        else:
+            # Если задан только tracking URI, ищем последнюю Staging-модель
+            mlflow.set_tracking_uri(tracking_uri)
+            client = mlflow.tracking.MlflowClient()
+            models = client.search_model_versions("name='credit_scoring_model'")
+            staging = [m for m in models if m.current_stage == "Staging"]
+            if not staging:
+                return None
+            latest = max(staging, key=lambda m: int(m.version))
+            uri = f"models:/credit_scoring_model/{latest.version}"
+        return mlflow.pyfunc.load_model(uri)
+    except Exception:
+        return None
+
+
 def _default_model_path() -> str:
     for name in ("model_bundle_catboost.pkl", "model_bundle.pkl"):
         p = ROOT / "models" / name
@@ -52,18 +77,19 @@ def _default_model_path() -> str:
     return str(ROOT / "models" / "model_bundle_catboost.pkl")
 
 
-def model_path() -> str:
-    return os.environ.get("MODEL_PATH", _default_model_path())
-
-
-def load_bundle() -> ModelBundle:
-    path = model_path()
+def load_bundle():
+    # Пробуем загрузить из Registry
+    reg_model = _load_from_registry()
+    if reg_model is not None:
+        return reg_model  # это pyfunc модель
+    # Fallback на локальный файл
+    path = os.environ.get("MODEL_PATH", _default_model_path())
     if not Path(path).is_file():
         raise FileNotFoundError(f"Model bundle not found: {path}")
     return load_model_bundle(path)
 
 
-def reload_bundle() -> None:
+def reload_bundle():
     global _bundle
     _bundle = load_bundle()
 
@@ -136,10 +162,18 @@ def root():
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
+    model_type = getattr(_bundle, "model_type", None)
+    if model_type is None and hasattr(_bundle, "metadata"):
+        # pyfunc model – get flavor info from metadata
+        try:
+            info = _bundle.metadata.get_model_info()
+            model_type = info.get("flavor", "pyfunc")
+        except Exception:
+            model_type = "pyfunc"
     return HealthResponse(
         status="ok",
-        model_path=model_path(),
-        model_type=_bundle.model_type if _bundle else None,
+        model_path=os.environ.get("MODEL_PATH", _default_model_path()),
+        model_type=model_type or "pyfunc",
     )
 
 
@@ -164,15 +198,32 @@ def score_one(body: ScoreRequest) -> ScoreResponse:
         request_id=rid,
         probability=proba,
         latency_ms=ms,
-        model_type=_bundle.model_type,
+        model_type=model_type(),
         path=EVENTS_PATH,
     )
     return ScoreResponse(
         request_id=rid,
         probability=proba,
-        model_type=_bundle.model_type,
+        model_type=model_type(),
         anomaly=anomaly,
     )
+
+
+def model_type() -> str:
+    if _bundle is None:
+        return "unknown"
+    if hasattr(_bundle, "model_type"):
+        return _bundle.model_type
+    if hasattr(_bundle, "metadata"):
+        try:
+            info = _bundle.metadata.get_model_info()
+            return info.get("flavor", "pyfunc")
+        except Exception:
+            pass
+    return "pyfunc"
+
+
+# ── Feedback endpoint ──────────────────────────────────────────────────────────
 
 
 @app.post("/v1/feedback", response_model=FeedbackResponse, tags=["scoring"])
@@ -233,7 +284,7 @@ def reload_model(x_admin_token: Optional[str] = Header(default=None)) -> Dict[st
         reload_bundle()
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"status": "reloaded", "model_path": model_path()}
+    return {"status": "reloaded", "model_path": os.environ.get("MODEL_PATH", _default_model_path())}
 
 
 @app.post("/internal/retrain", tags=["admin"])
@@ -309,7 +360,6 @@ def _load_mlflow_experiments() -> List[Dict[str, Any]]:
     """Try to fetch recent MLflow runs from tracking server."""
     mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
     try:
-        import mlflow
         mlflow.set_tracking_uri(mlflow_uri)
         client = mlflow.tracking.MlflowClient()
         experiments = client.search_experiments()
@@ -372,7 +422,7 @@ def dashboard(request: Request) -> Any:
             "predictions": predictions,
             "drift_alert": drift_alert,
             "retrain_status": _retrain_status,
-            "model_type": _bundle.model_type if _bundle else "unknown",
+            "model_type": model_type(),
             "offline_auc": offline_auc,
             "prometheus_url": os.environ.get("PROMETHEUS_UI_URL", "http://localhost:9090"),
             "grafana_url": os.environ.get("GRAFANA_UI_URL", "http://localhost:3000"),
@@ -385,7 +435,7 @@ def ui_inference(request: Request) -> Any:
     return templates.TemplateResponse(
         request,
         "inference.html",
-        {"model_type": _bundle.model_type if _bundle else "unknown"},
+        {"model_type": model_type()},
     )
 
 
