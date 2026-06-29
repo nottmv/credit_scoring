@@ -14,20 +14,14 @@ spec:
       labels:
         app: credit-scoring-api
     spec:
-      imagePullSecrets:
-        - name: ghcr-secret
       containers:
         - name: api
-          image: ghcr.io/nottmv/credit-scoring-api:fdb547ec3fdc8cd47b2e0ae48b6cb8045f97751b
+          image: credit-scoring-api:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
               name: http
           env:
-            - name: MLFLOW_TRACKING_URI
-              value: "http://mlflow:5000"
-            - name: MLFLOW_MODEL_URI
-              value: "models:/credit_scoring_model/Staging"
             - name: MODEL_PATH
               value: "/app/models/model_bundle_catboost.pkl"
             - name: EVENTS_JSONL_PATH
@@ -36,6 +30,12 @@ spec:
               value: "/app/reports/last_drift.json"
             - name: CHAMPION_METRICS_PATH
               value: "/app/reports/champion_metrics.json"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 5
           readinessProbe:
             httpGet:
               path: /health
