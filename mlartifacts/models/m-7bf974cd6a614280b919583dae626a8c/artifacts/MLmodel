@@ -1,0 +1,43 @@
+artifact_path: mlflow-artifacts:/models/m-7bf974cd6a614280b919583dae626a8c/artifacts
+flavors:
+  python_function:
+    artifacts:
+      bundle:
+        path: artifacts\model_bundle.pkl
+        uri: D:/MLOps/models/model_bundle.pkl
+    cloudpickle_version: 3.1.2
+    code: null
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pyfunc.model
+    python_model: python_model.pkl
+    python_version: 3.11.9
+    streamable: false
+is_signature_from_type_hint: false
+mlflow_version: 3.14.0
+model_id: m-7bf974cd6a614280b919583dae626a8c
+model_size_bytes: 1057727
+model_uuid: m-7bf974cd6a614280b919583dae626a8c
+prompts: null
+run_id: 4ea5966e4fb24c92bb84723a6e60778c
+saved_input_example_info:
+  artifact_path: input_example.json
+  pandas_orient: split
+  serving_input_path: serving_input_example.json
+  type: dataframe
+signature:
+  inputs: '[{"type": "double", "name": "DIR", "required": true}, {"type": "double",
+    "name": "Age", "required": true}, {"type": "long", "name": "NumLoans", "required":
+    true}, {"type": "long", "name": "NumRealEstateLoans", "required": true}, {"type":
+    "double", "name": "NumDependents", "required": true}, {"type": "long", "name":
+    "Num30-59Delinquencies", "required": true}, {"type": "long", "name": "Num60-89Delinquencies",
+    "required": true}, {"type": "double", "name": "Income", "required": true}, {"type":
+    "double", "name": "BalanceToCreditLimit", "required": true}, {"type": "double",
+    "name": "age_squared", "required": true}, {"type": "long", "name": "young_borrower_flag",
+    "required": true}, {"type": "long", "name": "senior_borrower_flag", "required":
+    true}]'
+  outputs: '[{"type": "double", "required": true}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2026-06-29 15:21:50.800464'

@@ -11,7 +11,7 @@ spec:
   source:
     repoURL: https://github.com/nottmv/credit_scoring.git
     targetRevision: master
-    path: k8s
+    path: k8s/prod
 
   destination:
     server: https://kubernetes.default.svc

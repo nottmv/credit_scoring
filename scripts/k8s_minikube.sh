@@ -29,7 +29,7 @@ minikube cp "${ROOT}/models/model_bundle_catboost.pkl" "minikube:/tmp/credit-mod
 
 echo ">>> kubectl apply"
 kubectl apply -f "${ROOT}/k8s/mlflow.yaml"
-kubectl apply -f "${ROOT}/k8s/deployment.yaml"
+kubectl apply -f "${ROOT}/k8s/local/deployment.yaml"
 kubectl apply -f "${ROOT}/k8s/service.yaml"
 kubectl apply -f "${ROOT}/k8s/prometheus.yaml"
 

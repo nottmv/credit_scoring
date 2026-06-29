@@ -36,6 +36,12 @@ spec:
               value: "/app/reports/last_drift.json"
             - name: CHAMPION_METRICS_PATH
               value: "/app/reports/champion_metrics.json"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 5
           readinessProbe:
             httpGet:
               path: /health

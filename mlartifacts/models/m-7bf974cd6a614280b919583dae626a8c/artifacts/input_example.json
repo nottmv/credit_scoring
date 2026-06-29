@@ -1,0 +1,1 @@
+{"columns": ["DIR", "Age", "NumLoans", "NumRealEstateLoans", "NumDependents", "Num30-59Delinquencies", "Num60-89Delinquencies", "Income", "BalanceToCreditLimit", "age_squared", "young_borrower_flag", "senior_borrower_flag"], "data": [[3682.990997, 46.4, 12, 1, 1.0, 0, 0, 5420.2001695, 0.105423, 2152.96, 0, 0]]}

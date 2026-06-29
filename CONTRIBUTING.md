@@ -129,7 +129,7 @@ make k8s-images
 minikube ssh "sudo mkdir -p /tmp/credit-models && sudo chmod a+rwx /tmp/credit-models"
 minikube cp ./models/model_bundle_catboost.pkl minikube:/tmp/credit-models/model_bundle_catboost.pkl
 kubectl apply -f k8s/mlflow.yaml
-kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/local/deployment.yaml
 kubectl apply -f k8s/service.yaml
 kubectl apply -f k8s/prometheus.yaml
 ```
