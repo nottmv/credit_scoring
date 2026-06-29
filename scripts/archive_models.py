@@ -14,3 +14,4 @@ else:
             client.transition_model_version_stage(name=name, version=v.version, stage="Archived")
             print(f"Archived version {v.version}")
     print(f"Version {latest} remains in Staging.")
+    
