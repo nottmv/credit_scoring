@@ -42,3 +42,5 @@ httpx>=0.27
 
 # Data download
 gdown>=5.0
+
+mlflow-skinny

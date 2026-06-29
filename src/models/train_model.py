@@ -488,7 +488,7 @@ def log_mlflow_run(
         test_X, _ = eval_sets["test"]
         input_example = test_X.head(1)
         log_pyfunc_model(
-            str(bundle_path.resolve()),
+            str(bundle_path.resolve().as_posix()),
             registered_model_name=register_name,
             input_example=input_example,
         )
