@@ -50,22 +50,27 @@ def _load_from_registry() -> Optional[Any]:
     registry_uri = os.environ.get("MLFLOW_MODEL_URI")
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
     if not registry_uri and not tracking_uri:
+        print("MLflow Registry: no tracking or model URI set, skip.")
         return None
     try:
         if registry_uri:
             uri = registry_uri
         else:
-            # Если задан только tracking URI, ищем последнюю Staging-модель
             mlflow.set_tracking_uri(tracking_uri)
             client = mlflow.tracking.MlflowClient()
             models = client.search_model_versions("name='credit_scoring_model'")
             staging = [m for m in models if m.current_stage == "Staging"]
             if not staging:
+                print("No model version with stage=Staging found.")
                 return None
             latest = max(staging, key=lambda m: int(m.version))
             uri = f"models:/credit_scoring_model/{latest.version}"
-        return mlflow.pyfunc.load_model(uri)
-    except Exception:
+        print(f"Loading model from Registry: {uri}")
+        model = mlflow.pyfunc.load_model(uri)
+        print("Model loaded from Registry successfully.")
+        return model
+    except Exception as e:
+        print(f"ERROR loading model from Registry: {e}")
         return None
 
 
