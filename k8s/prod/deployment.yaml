@@ -18,7 +18,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: api
-          image: ghcr.io/nottmv/credit-scoring-api:latest
+          image: ghcr.io/nottmv/credit-scoring-api:1fc93594f40571415bd8c003e092c52d93424450
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
