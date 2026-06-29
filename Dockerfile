@@ -20,8 +20,6 @@ RUN pip install --no-cache-dir -U pip setuptools wheel \
 
 RUN mkdir -p /app/models /app/reports
 
-COPY models/model_bundle_catboost.pkl /app/models/
-
 EXPOSE 8000
 
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
