@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
@@ -58,13 +58,13 @@ def _load_from_registry() -> Optional[Any]:
         else:
             mlflow.set_tracking_uri(tracking_uri)
             client = mlflow.tracking.MlflowClient()
-            models = client.search_model_versions("name='credit_scoring_model'")
-            staging = [m for m in models if m.current_stage == "Staging"]
+            models = client.search_model_versions("name='credit_scoring_catboost'")
+            staging = [m for m in models if m.current_stage in ("Staging", "Production")]
             if not staging:
-                print("No model version with stage=Staging found.")
+                print("No model version with stage=Staging/Production found.")
                 return None
             latest = max(staging, key=lambda m: int(m.version))
-            uri = f"models:/credit_scoring_model/{latest.version}"
+            uri = f"models:/credit_scoring_catboost/{latest.version}"
         print(f"Loading model from Registry: {uri}")
         model = mlflow.pyfunc.load_model(uri)
         print("Model loaded from Registry successfully.")
@@ -279,6 +279,18 @@ def drift_report() -> Dict[str, Any]:
     return report
 
 
+@app.get("/reports/drift.html", tags=["monitoring"], include_in_schema=False)
+def drift_html_report() -> Any:
+    """Serve latest Evidently HTML drift report."""
+    html_path = REPORTS / "drift_report.html"
+    if not html_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="No drift HTML report. Run drift_check or drift_simulator.",
+        )
+    return FileResponse(html_path, media_type="text/html")
+
+
 # ── Admin endpoints ────────────────────────────────────────────────────────────
 
 
@@ -316,7 +328,11 @@ def trigger_retrain(
         ]
         mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
         if mlflow_uri:
-            cmd += ["--mlflow-uri", mlflow_uri, "--mlflow-experiment", "credit_scoring"]
+            cmd += [
+                "--mlflow-uri", mlflow_uri,
+                "--mlflow-experiment", "credit_scoring",
+                "--mlflow-register", "credit_scoring_catboost",
+            ]
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

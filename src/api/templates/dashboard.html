@@ -359,6 +359,8 @@
           </div>
           <div style="margin-top:.75rem; font-size:.8rem; color:var(--muted);">
             Строк: ref {{ drift.reference_rows }}, cur {{ drift.current_rows }}
+            &nbsp;|&nbsp;
+            <a href="/reports/drift.html" class="link" target="_blank">Evidently HTML отчёт</a>
           </div>
         {% else %}
           <p class="no-data">Нет данных. Выполните: <code>make drift-check CURRENT=data/incoming/batch.csv</code></p>
