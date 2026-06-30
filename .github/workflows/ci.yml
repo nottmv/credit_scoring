@@ -2,13 +2,18 @@ name: CI
 
 on:
   pull_request:
-    branches: [master]
+    branches: [main, master]
   push:
-    branches: [master]
+    branches: [main, master]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  API_IMAGE: ghcr.io/nottmv/credit-scoring-api
+  MLFLOW_IMAGE: ghcr.io/nottmv/credit-scoring-mlflow
 
 jobs:
   lint-test:
@@ -36,6 +41,19 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install deps and bake model into image context
+        run: |
+          python -m pip install -U pip setuptools wheel
+          python -m pip install -r requirements-docker.txt
+          python src/models/train_model.py \
+            --data data/raw/synthetic_min.csv \
+            --model-type catboost \
+            --save models/model_bundle_catboost.pkl
+          test -f models/model_bundle_catboost.pkl
       - uses: docker/setup-buildx-action@v3
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -48,36 +66,54 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          push: true
+          push: ${{ github.event_name == 'push' }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/credit-scoring-api:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/credit-scoring-api:latest
+            ${{ env.API_IMAGE }}:${{ github.sha }}
+            ${{ env.API_IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Build MLflow image (optional)
+      - name: Build and verify API image on PR
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: credit-scoring-api:pr-check
+      - name: Build and push MLflow image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/mlflow/Dockerfile
-          push: false
-          load: true
-          tags: ghcr.io/${{ github.repository_owner }}/credit-scoring-mlflow:ci
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ env.MLFLOW_IMAGE }}:${{ github.sha }}
+            ${{ env.MLFLOW_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify API image exists in GHCR (push only)
+        if: github.event_name == 'push'
+        run: |
+          docker buildx imagetools inspect "${{ env.API_IMAGE }}:${{ github.sha }}"
+          docker buildx imagetools inspect "${{ env.API_IMAGE }}:latest"
 
   deploy:
     runs-on: ubuntu-latest
     needs: docker
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
-      - name: Update deployment image tag
+      - name: Update deployment image tag (GitOps for ArgoCD)
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          sed -i "s|image:.*credit-scoring-api:.*|image: ghcr.io/${{ github.repository_owner }}/credit-scoring-api:${{ github.sha }}|" k8s/prod/deployment.yaml
-          git add k8s/prod/deployment.yaml
+          sed -i "s|image:.*credit-scoring-api:.*|image: ${{ env.API_IMAGE }}:${{ github.sha }}|" k8s/prod/deployment.yaml
+          sed -i "s|image:.*credit-scoring-mlflow:.*|image: ${{ env.MLFLOW_IMAGE }}:${{ github.sha }}|" k8s/prod/mlflow.yaml
+          git add k8s/prod/deployment.yaml k8s/prod/mlflow.yaml
           git diff --staged --quiet || git commit -m "ci: update image tag to ${{ github.sha }} [skip ci]"
           git push

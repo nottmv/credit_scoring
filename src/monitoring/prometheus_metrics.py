@@ -59,6 +59,15 @@ GAUGE_DRIFT_DEGRADED = Gauge(
     "credit_drift_degraded",
     "1 if any drift dimension flagged",
 )
+GAUGE_FEATURE_PSI = Gauge(
+    "credit_drift_feature_psi",
+    "PSI per feature (from last drift report)",
+    ["feature"],
+)
+GAUGE_DRIFT_SCORE = Gauge(
+    "credit_drift_score",
+    "Composite drift score (max PSI, 0-1 scale)",
+)
 
 
 def observe_score_ok(latency_seconds: float, probability: float) -> None:
@@ -90,10 +99,23 @@ def refresh_drift_gauges(drift_path: Path) -> None:
     except json.JSONDecodeError:
         return
 
+    # Per-feature PSI (Evidently or merged report)
+    feature_psi = d.get("feature_psi") or {}
+    if not feature_psi and isinstance(d.get("evidently"), dict):
+        feature_psi = d["evidently"].get("feature_psi") or {}
+    for feat, psi in feature_psi.items():
+        if isinstance(psi, (int, float)):
+            GAUGE_FEATURE_PSI.labels(feature=str(feat)).set(float(psi))
+
+    max_psi_val = _nested_get(d, "data_drift", "max_psi") or d.get("max_psi") or 0.0
+    if feature_psi:
+        max_psi_val = max(max_psi_val, max(float(v) for v in feature_psi.values()))
+    GAUGE_DRIFT_SCORE.set(min(float(max_psi_val), 1.0))
+
     # New nested format
     if "data_drift" in d:
         GAUGE_DATA_MAX_KS.set(_nested_get(d, "data_drift", "max_ks") or 0.0)
-        GAUGE_DATA_MAX_PSI.set(_nested_get(d, "data_drift", "max_psi") or 0.0)
+        GAUGE_DATA_MAX_PSI.set(float(max_psi_val))
         z = _nested_get(d, "target_drift", "z_score")
         GAUGE_TARGET_Z.set(z if z is not None else 0.0)
         GAUGE_TARGET_RATE_REF.set(

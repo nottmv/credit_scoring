@@ -105,3 +105,7 @@ catboost_info/
 reports/*.jsonl
 reports/last_drift.json
 reports/champion_metrics.json
+reports/evidently_drift.json
+reports/drift_report.html
+reports/incoming/
+.dvc-storage/

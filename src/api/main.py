@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
@@ -58,13 +58,13 @@ def _load_from_registry() -> Optional[Any]:
         else:
             mlflow.set_tracking_uri(tracking_uri)
             client = mlflow.tracking.MlflowClient()
-            models = client.search_model_versions("name='credit_scoring_model'")
-            staging = [m for m in models if m.current_stage == "Staging"]
+            models = client.search_model_versions("name='credit_scoring_catboost'")
+            staging = [m for m in models if m.current_stage in ("Staging", "Production")]
             if not staging:
-                print("No model version with stage=Staging found.")
+                print("No model version with stage=Staging/Production found.")
                 return None
             latest = max(staging, key=lambda m: int(m.version))
-            uri = f"models:/credit_scoring_model/{latest.version}"
+            uri = f"models:/credit_scoring_catboost/{latest.version}"
         print(f"Loading model from Registry: {uri}")
         model = mlflow.pyfunc.load_model(uri)
         print("Model loaded from Registry successfully.")
@@ -83,15 +83,22 @@ def _default_model_path() -> str:
 
 
 def load_bundle():
-    # Пробуем загрузить из Registry
+    """Registry first (if configured), then baked/local MODEL_PATH."""
+    path = os.environ.get("MODEL_PATH", _default_model_path())
+    if Path(path).is_file():
+        try:
+            reg_model = _load_from_registry()
+            if reg_model is not None:
+                return reg_model
+        except Exception as exc:
+            print(f"Registry load skipped, using local bundle: {exc}")
+        return load_model_bundle(path)
     reg_model = _load_from_registry()
     if reg_model is not None:
-        return reg_model  # это pyfunc модель
-    # Fallback на локальный файл
-    path = os.environ.get("MODEL_PATH", _default_model_path())
-    if not Path(path).is_file():
-        raise FileNotFoundError(f"Model bundle not found: {path}")
-    return load_model_bundle(path)
+        return reg_model
+    raise FileNotFoundError(
+        f"Model bundle not found at {path} and MLflow Registry unavailable"
+    )
 
 
 def reload_bundle():
@@ -102,7 +109,20 @@ def reload_bundle():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _bundle
-    _bundle = load_bundle()
+    max_attempts = int(os.environ.get("MODEL_LOAD_RETRIES", "24"))
+    delay_s = float(os.environ.get("MODEL_LOAD_RETRY_DELAY", "5"))
+    for attempt in range(1, max_attempts + 1):
+        try:
+            _bundle = load_bundle()
+            print(f"Model loaded on attempt {attempt}/{max_attempts}")
+            break
+        except Exception as exc:
+            print(f"Model load attempt {attempt}/{max_attempts} failed: {exc}")
+            _bundle = None
+            if attempt < max_attempts:
+                await asyncio.sleep(delay_s)
+    if _bundle is None:
+        print("WARNING: API starting without a loaded model (health=degraded)")
     yield
     _bundle = None
 
@@ -118,9 +138,10 @@ app = FastAPI(
 
 
 class HealthResponse(BaseModel):
-    status: str
+    status: str  # ok | degraded
     model_path: str
     model_type: Optional[str] = None
+    model_loaded: bool = True
 
 
 class ScoreRequest(BaseModel):
@@ -167,18 +188,14 @@ def root():
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
-    model_type = getattr(_bundle, "model_type", None)
-    if model_type is None and hasattr(_bundle, "metadata"):
-        # pyfunc model – get flavor info from metadata
-        try:
-            info = _bundle.metadata.get_model_info()
-            model_type = info.get("flavor", "pyfunc")
-        except Exception:
-            model_type = "pyfunc"
+    if _bundle is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    mt = model_type()
     return HealthResponse(
         status="ok",
         model_path=os.environ.get("MODEL_PATH", _default_model_path()),
-        model_type=model_type or "pyfunc",
+        model_type=mt,
+        model_loaded=True,
     )
 
 
@@ -279,6 +296,18 @@ def drift_report() -> Dict[str, Any]:
     return report
 
 
+@app.get("/reports/drift.html", tags=["monitoring"], include_in_schema=False)
+def drift_html_report() -> Any:
+    """Serve latest Evidently HTML drift report."""
+    html_path = REPORTS / "drift_report.html"
+    if not html_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="No drift HTML report. Run drift_check or drift_simulator.",
+        )
+    return FileResponse(html_path, media_type="text/html")
+
+
 # ── Admin endpoints ────────────────────────────────────────────────────────────
 
 
@@ -316,7 +345,11 @@ def trigger_retrain(
         ]
         mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
         if mlflow_uri:
-            cmd += ["--mlflow-uri", mlflow_uri, "--mlflow-experiment", "credit_scoring"]
+            cmd += [
+                "--mlflow-uri", mlflow_uri,
+                "--mlflow-experiment", "credit_scoring",
+                "--mlflow-register", "credit_scoring_catboost",
+            ]
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

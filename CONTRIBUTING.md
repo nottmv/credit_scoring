@@ -46,10 +46,6 @@ make requirements
 make local-up
 ```
 
-Если нет `data/raw/credit_scoring.csv`, обучение пойдёт на `synthetic_min.csv`; для полного датасета: `make fetch-data`.
-
-**MLflow пустой**, пока не залогирован хотя бы один run: сначала `make local-up` (MLflow на :5000), затем **`make train-mlflow`** (или `python src/models/train_model.py ... --mlflow-uri http://127.0.0.1:5000`). Без `--mlflow-uri` / `MLFLOW_TRACKING_URI` обучение не пишет в UI.
-
 ## Docker на macOS
 
 ### Установка и `command not found: docker`

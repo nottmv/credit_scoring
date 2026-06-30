@@ -78,6 +78,21 @@ drift-check: requirements
 		else REF=data/raw/synthetic_min.csv; fi && \
 		$(PYTHON_INTERPRETER) scripts/drift_check.py --reference $$REF --current $(CURRENT) --model-path models/model_bundle_catboost.pkl'
 
+## Drift simulator (docker compose profile or default stack)
+drift-sim: requirements
+	PYTHONPATH=. $(PYTHON_INTERPRETER) scripts/drift_simulator.py --interval 30
+
+## DVC pipeline (train + drift_check)
+dvc-repro: requirements
+	dvc repro
+
+## DVC push/pull to local remote (.dvc-storage)
+dvc-push:
+	dvc push -r localstorage
+
+dvc-pull:
+	dvc pull -r localstorage
+
 ## Retrain (optional MLflow: export MLFLOW_TRACKING_URI=...)
 retrain: requirements
 	@if [ -f data/raw/credit_scoring.csv ]; then \
