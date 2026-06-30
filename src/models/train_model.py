@@ -501,9 +501,23 @@ def log_mlflow_run(
                 client.transition_model_version_stage(
                     name=register_name,
                     version=latest_version,
-                    stage="Staging"
+                    stage="Staging",
                 )
                 print(f"Model {register_name} version {latest_version} promoted to Staging")
+                # Archive previous Production, promote new version to Production
+                for v in registered_models:
+                    if v.current_stage == "Production" and int(v.version) != latest_version:
+                        client.transition_model_version_stage(
+                            name=register_name,
+                            version=v.version,
+                            stage="Archived",
+                        )
+                client.transition_model_version_stage(
+                    name=register_name,
+                    version=latest_version,
+                    stage="Production",
+                )
+                print(f"Model {register_name} version {latest_version} promoted to Production")
 
 
 def main() -> None:
@@ -531,8 +545,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--mlflow-register",
-        default="credit_scoring_model",
-        help="Model Registry name (staging promotion enabled by default)",
+        default="credit_scoring_catboost",
+        help="Model Registry name (Staging + Production promotion)",
     )
     parser.add_argument(
         "--champion-report",
