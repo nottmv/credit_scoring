@@ -1,0 +1,16 @@
+model:
+  type: catboost
+  save_path: models/model_bundle_catboost.pkl
+
+data:
+  raw: data/raw/synthetic_min.csv
+  reference: data/raw/synthetic_min.csv
+
+drift:
+  ks_threshold: 0.2
+  psi_threshold: 0.25
+  current: data/incoming/current.csv
+
+mlflow:
+  experiment: credit_scoring
+  register: credit_scoring_catboost

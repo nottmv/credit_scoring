@@ -1,0 +1,49 @@
+schema: '2.0'
+stages:
+  drift_check:
+    cmd: python3 scripts/drift_check.py --reference data/raw/synthetic_min.csv 
+      --current data/incoming/current.csv --model-path 
+      models/model_bundle_catboost.pkl --report-path reports/last_drift.json 
+      --html-path reports/drift_report.html
+    deps:
+    - path: data/incoming/current.csv
+      hash: md5
+      md5: 770bcffcec4ab6e92a8318e5fcac4582
+      size: 38903
+    - path: data/raw/synthetic_min.csv
+      hash: md5
+      md5: 941fea8cae79fcbe3631c089f33e47a3
+      size: 62329
+    - path: models/model_bundle_catboost.pkl
+      hash: md5
+      md5: 7d5679720197dabbc148fba4ae47b471
+      size: 74275
+    - path: scripts/drift_check.py
+      hash: md5
+      md5: 7530e5325c6621c3a15c1482ff1ea4dd
+      size: 2549
+    - path: src/monitoring/drift.py
+      hash: md5
+      md5: 81d4ee0d3e534ef0acbde0f14cc0c25f
+      size: 12525
+    - path: src/monitoring/evidently_drift.py
+      hash: md5
+      md5: f5162a59a685974238ea063d46d495b7
+      size: 5032
+    params:
+      params.yaml:
+        drift.ks_threshold: 0.2
+        drift.psi_threshold: 0.25
+    outs:
+    - path: reports/drift_report.html
+      hash: md5
+      md5: de356af681ab513b8524101c38efb380
+      size: 4211545
+    - path: reports/evidently_drift.json
+      hash: md5
+      md5: 6a905a4bb30e177ead27ecef89e6c858
+      size: 1857
+    - path: reports/last_drift.json
+      hash: md5
+      md5: 5c38ff536afe4f57c1db6f35e7ac1635
+      size: 3660

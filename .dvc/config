@@ -1,4 +1,6 @@
 [core]
-    remote = mlops
+    remote = localstorage
+['remote "localstorage"']
+    url = ../.dvc-storage
 ['remote "mlops"']
     url = gdrive://1HbYd0bgGCuGbBdKDmH0dCGJQt-pOHcGv

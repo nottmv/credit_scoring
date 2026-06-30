@@ -1,0 +1,44 @@
+stages:
+  drift_check:
+    cmd: >-
+      python3 scripts/drift_check.py
+      --reference ${data.reference}
+      --current ${drift.current}
+      --model-path ${model.save_path}
+      --report-path reports/last_drift.json
+      --html-path reports/drift_report.html
+    deps:
+      - scripts/drift_check.py
+      - src/monitoring/drift.py
+      - src/monitoring/evidently_drift.py
+      - ${data.reference}
+      - ${model.save_path}
+      - ${drift.current}
+    params:
+      - params.yaml:
+          - drift.ks_threshold
+          - drift.psi_threshold
+    outs:
+      - reports/last_drift.json
+      - reports/drift_report.html
+      - reports/evidently_drift.json
+
+  train:
+    cmd: >-
+      python3 src/models/train_model.py
+      --data ${data.raw}
+      --model-type ${model.type}
+      --save ${model.save_path}
+      --champion-report reports/champion_metrics.json
+    deps:
+      - src/models/train_model.py
+      - src/models/shared.py
+      - src/features/build_features.py
+      - ${data.raw}
+    params:
+      - params.yaml:
+          - model.type
+          - model.save_path
+          - data.raw
+    outs:
+      - reports/champion_metrics.json
