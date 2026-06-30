@@ -35,7 +35,7 @@ spec:
               echo "MLflow port is open"
       containers:
         - name: api
-          image: ghcr.io/nottmv/credit-scoring-api:latest
+          image: ghcr.io/nottmv/credit-scoring-api:4005325e8c737966791afbc6be0d6d0fc3c04340
           imagePullPolicy: Always
           ports:
             - containerPort: 8000

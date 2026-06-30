@@ -32,7 +32,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: mlflow
-          image: ghcr.io/nottmv/credit-scoring-mlflow:latest
+          image: ghcr.io/nottmv/credit-scoring-mlflow:4005325e8c737966791afbc6be0d6d0fc3c04340
           imagePullPolicy: Always
           ports:
             - containerPort: 5000
