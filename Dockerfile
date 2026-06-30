@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 
 COPY setup.py requirements-docker.txt ./
 COPY src ./src
+COPY models/model_bundle_catboost.pkl /app/models/model_bundle_catboost.pkl
 RUN pip install --no-cache-dir -U pip setuptools wheel \
     && pip install --no-cache-dir -r requirements-docker.txt
 

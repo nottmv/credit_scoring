@@ -6,6 +6,13 @@ metadata:
     app: credit-scoring-api
 spec:
   replicas: 1
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 300
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: credit-scoring-api
@@ -16,18 +23,34 @@ spec:
     spec:
       imagePullSecrets:
         - name: ghcr-secret
+      initContainers:
+        - name: wait-mlflow
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MLflow at mlflow:5000..."
+              until nc -z mlflow 5000; do sleep 3; done
+              echo "MLflow port is open"
       containers:
         - name: api
-          image: ghcr.io/nottmv/credit-scoring-api:1fc93594f40571415bd8c003e092c52d93424450
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/nottmv/credit-scoring-api:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
               name: http
           env:
+            - name: MODEL_PATH
+              value: "/app/models/model_bundle_catboost.pkl"
             - name: MLFLOW_TRACKING_URI
               value: "http://mlflow:5000"
             - name: MLFLOW_MODEL_URI
               value: "models:/credit_scoring_catboost/Production"
+            - name: MODEL_LOAD_RETRIES
+              value: "24"
+            - name: MODEL_LOAD_RETRY_DELAY
+              value: "5"
             - name: EVENTS_JSONL_PATH
               value: "/app/reports/events.jsonl"
             - name: DRIFT_REPORT_PATH
@@ -50,7 +73,7 @@ spec:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 15
+            initialDelaySeconds: 30
             periodSeconds: 25
           resources:
             requests:
