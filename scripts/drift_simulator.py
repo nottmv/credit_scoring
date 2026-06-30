@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-Synthetic drift stream: gradually shifts feature distributions and target rate,
-runs drift checks on an interval, updates reports/ + Prometheus gauges via API.
-
-Usage:
-  python scripts/drift_simulator.py --interval 30
-  DRIFT_SIM_INTERVAL=30 docker compose up drift-simulator
-"""
-
 from __future__ import annotations
 
 import argparse

@@ -140,6 +140,7 @@
       ],
       "title": "Predicted PD (median)",
       "type": "timeseries"
+    },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {

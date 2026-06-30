@@ -1,8 +1,8 @@
+[![CI](https://github.com/nottmv/credit_scoring/actions/workflows/ci.yml/badge.svg)](https://github.com/nottmv/credit_scoring/actions/workflows/ci.yml)
+
 # Credit Scoring — MLOps система
 
 Полный цикл MLOps: **данные → обучение → регистрация модели → сервинг → мониторинг дрейфа → переобучение → GitOps-деплой**.
-
-Репозиторий: [github.com/nottmv/credit_scoring](https://github.com/nottmv/credit_scoring)
 
 ---
 

@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-"""Regenerate data/raw/synthetic_min.csv with labels correlated to risk features."""
-
 from __future__ import annotations
 
 from pathlib import Path
