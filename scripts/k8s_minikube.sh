@@ -32,6 +32,7 @@ kubectl apply -f "${ROOT}/k8s/mlflow.yaml"
 kubectl apply -f "${ROOT}/k8s/local/deployment.yaml"
 kubectl apply -f "${ROOT}/k8s/service.yaml"
 kubectl apply -f "${ROOT}/k8s/prometheus.yaml"
+kubectl apply -f "${ROOT}/k8s/ingress.yaml" 2>/dev/null || echo "Ingress skipped (enable nginx ingress addon)"
 
 echo ""
 echo "Дождитесь Ready: kubectl get pods -w"
