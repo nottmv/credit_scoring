@@ -1,336 +1,274 @@
 # Credit Scoring — MLOps система
 
-Полный цикл MLOps: **новые данные → обнаружение деградации → переобучение → обновление модели в сервисе → мониторинг через веб-интерфейс**.
+Полный цикл MLOps: **данные → обучение → регистрация модели → сервинг → мониторинг дрейфа → переобучение → GitOps-деплой**.
 
 Репозиторий: [github.com/nottmv/credit_scoring](https://github.com/nottmv/credit_scoring)
 
 ---
 
-## Структура проекта
+## Архитектура
 
+```mermaid
+flowchart TB
+  subgraph Data
+    RAW[(data/raw/*.csv)]
+    DVC[DVC remote\nlocalstorage + gdrive]
+  end
+
+  subgraph Training
+    TRAIN[train_model.py]
+    MLF[(MLflow Tracking\n:5000)]
+    REG[(Model Registry\nStaging → Production)]
+  end
+
+  subgraph Serving
+    API[FastAPI :8000\n/v1/score + Web UI]
+    PROM[Prometheus :9090]
+    GRAF[Grafana :3000]
+  end
+
+  subgraph Drift
+    SIM[drift_simulator.py]
+    EVI[Evidently HTML/JSON]
+    SCIPY[scipy KS/PSI/z-test]
+  end
+
+  subgraph CD
+    GHA[GitHub Actions]
+    GHCR[GHCR image]
+    ARGO[Argo CD]
+    K8S[Kubernetes / Minikube]
+  end
+
+  RAW --> DVC
+  DVC --> TRAIN
+  TRAIN --> MLF --> REG
+  REG --> API
+  RAW --> SIM --> EVI
+  SIM --> SCIPY
+  EVI --> API
+  API --> PROM --> GRAF
+  GHA --> GHCR --> ARGO --> K8S
+  ARGO --> K8S
+  K8S --> API
 ```
-credit_scoring/
-├── src/
-│   ├── api/
-│   │   ├── main.py                  # FastAPI: scoring, UI, retrain, drift
-│   │   └── templates/
-│   │       ├── dashboard.html       # Мониторинг + таблица предсказаний
-│   │       ├── inference.html       # Страница инференса
-│   │       └── experiments.html    # MLflow эксперименты
-│   ├── models/
-│   │   ├── train_model.py           # CatBoost / XGBoost, MLflow logging
-│   │   └── mlflow_pyfunc.py         # MLflow pyfunc wrapper
-│   ├── monitoring/
-│   │   ├── drift.py                 # Data / target / concept drift (KS, PSI, z-test)
-│   │   ├── metrics_store.py         # JSONL-лог событий scoring + feedback
-│   │   └── prometheus_metrics.py    # Prometheus Counter, Gauge, Histogram
-│   ├── features/
-│   │   └── build_features.py        # Feature engineering
-│   └── data/
-│       └── make_dataset.py          # Загрузка сырых данных
-├── scripts/
-│   ├── drift_check.py               # CLI: data/target/concept drift report
-│   ├── retrain_pipeline.py          # CLI: train + drift + MLflow
-│   ├── download_drive_artifacts.py  # Скачать данные и модели с Google Drive
-│   ├── start_local_stack.sh         # API + MLflow без Docker
-│   ├── final_check.sh               # lint + tests + docker compose smoke
-│   └── k8s_minikube.sh              # Деплой в minikube
-├── k8s/
-│   ├── deployment.yaml              # API Deployment
-│   ├── service.yaml                 # API NodePort :30800
-│   ├── mlflow.yaml                  # MLflow + PVC + Service :30500
-│   ├── prometheus.yaml              # Prometheus ConfigMap + Deployment :30909
-│   └── manual/
-│       └── job-retrain.yaml         # Job переобучения (ручной apply)
-├── argocd/
-│   └── application.yaml            # ArgoCD Application (auto-sync k8s/)
-├── monitoring/
-│   ├── prometheus.yml               # Prometheus scrape config (docker compose)
-│   └── grafana/
-│       ├── provisioning/            # Datasource + dashboard provider
-│       └── dashboards/
-│           └── credit_scoring.json  # Grafana dashboard (9 панелей)
-├── .github/workflows/
-│   ├── ci.yml                       # lint → test → docker build → deploy
-│   ├── commitlint.yml               # Проверка формата коммитов (Conventional Commits) при Pull Request
-│   └── retrain-dispatch.yml         # Ручной запуск переобучения через Actions
-├── docker/mlflow/Dockerfile         # MLflow tracking server image
-├── Dockerfile                       # API image (python 3.11-slim)
-├── docker-compose.yml               # API + MLflow + Prometheus + Grafana
-├── data/
-│   ├── raw/
-│   │   ├── credit_scoring.csv.dvc   # Полный датасет (DVC → Google Drive)
-│   │   └── synthetic_min.csv        # Минимальный синтетический (fallback)
-│   └── ...
-├── models/                          # .pkl (DVC tracked)
-├── reports/                         # last_drift.json, champion_metrics.json, events.jsonl
-├── tests/
-│   ├── conftest.py                  # Fixtures: mock bundle, TestClient
-│   ├── test_api.py                  # API tests (18 тестов)
-│   └── test_drift.py                # Drift computation tests
-├── Makefile                         # Основные команды
-├── requirements.txt                 # Dev зависимости
-├── requirements-docker.txt          # Runtime (без dev)
-├── setup.py / setup.cfg             # Пакет src + flake8/pytest config
-└── CONTRIBUTING.md                  # Git flow, conventional commits, Docker, K8s
-```
+
+| Компонент | Технология | Назначение |
+|-----------|------------|------------|
+| Датасет | Kaggle *Give Me Some Credit* (150k, 10 признаков) | `Delinquent90` — дефолт 90+ дней |
+| Модель | **CatBoostClassifier** (основная), XGBoost (альтернатива) | ROC-AUC / Gini, early stopping |
+| Версионирование | Git (GitHub Flow) + DVC | Код + данные/модели |
+| Эксперименты | MLflow 3.x | Метрики, артефакты, Registry |
+| Дрейф | **Evidently AI** + scipy (KS, PSI, z-test) | HTML + JSON отчёты |
+| Мониторинг | Prometheus + Grafana | Метрики API и дрейфа |
+| CI/CD | GitHub Actions + Argo CD | lint → test → docker → GitOps |
+| Шаблон | [Cookiecutter Data Science](https://drivendata.github.io/cookiecutter-data-science/) | `src/`, `data/`, `models/`, `reports/` |
+
+**Почему CatBoost:** устойчив к пропускам, хорошо работает на табличных данных без тяжёлого feature engineering, встроенная регуляризация и early stopping — стандарт для credit scoring baseline.
+
+**Почему Evidently:** готовые HTML-отчёты data drift + интеграция с учебным стеком; scipy-метрики сохранены для unit-тестов и Prometheus.
+
+**Git flow:** [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow) — защищённая ветка `master` (или `main`), feature/fix-ветки, merge через PR с зелёным CI и Conventional Commits.
 
 ---
 
-## Датасет и модель
+## Быстрый старт (с нуля)
 
-| Параметр | Значение |
-|----------|---------|
-| Датасет | [Give Me Some Credit (Kaggle)](https://www.kaggle.com/c/GiveMeSomeCredit) — 150k заёмщиков, 10 признаков |
-| Цель | `Delinquent90` — просрочка 90+ дней в 2 года |
-| Базовая модель | **CatBoostClassifier** (глубина 1, регуляризация, early stopping) |
-| Альтернатива | **XGBoostBooster** (max_depth=1, alpha=50, lambda=200) |
-| Метрика | ROC-AUC (Gini = 2·AUC − 1), разбивка train/test/validation |
-
----
-
-## Быстрый старт
-
-### 1. Клонирование и зависимости
+### 1. Клонирование и окружение
 
 ```bash
 git clone https://github.com/nottmv/credit_scoring.git
 cd credit_scoring
-python3.11 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip setuptools wheel
 pip install -r requirements.txt
 ```
 
 ### 2. Данные
 
-**Вариант A — DVC:**
+**A — DVC (рекомендуется):**
 ```bash
-pip install 'dvc[gdrive]'
-dvc pull  # OAuth Google при первом запуске
+dvc pull -r localstorage          # локальный remote (.dvc-storage)
+# или полный датасет:
+pip install 'dvc[gdrive]' && dvc pull -r mlops
 ```
 
-**Вариант B — прямое скачивание:**
+**B — синтетические данные (без авторизации):**
 ```bash
-python scripts/download_drive_artifacts.py
-```
-
-**Вариант C — обучение на синтетических данных (без авторизации):**
-```bash
-# make train автоматически использует synthetic_min.csv если нет credit_scoring.csv
+# уже в репозитории: data/raw/synthetic_min.csv (~800 строк)
 make train
+```
+
+**C — Google Drive:**
+```bash
+make fetch-data
 ```
 
 ### 3. Обучение
 
 ```bash
-make train            # CatBoost на доступных данных
-make train-mlflow     # То же + логирование в MLflow (требует запущенный сервер)
+make train                        # CatBoost → models/model_bundle_catboost.pkl
+make train-mlflow                 # + логирование в MLflow (нужен сервер)
 ```
 
-### 4. Локальный запуск без Docker
+### 4. Локальный стек (без Docker)
 
 ```bash
 make local-up
-# API: http://127.0.0.1:8000
-# MLflow: http://127.0.0.1:5000
+# API:     http://127.0.0.1:8000/docs
+# Dashboard: http://127.0.0.1:8000/dashboard
+# MLflow:  http://127.0.0.1:5000
 ```
 
 ### 5. Docker Compose (полный стек)
 
 ```bash
-make train            # Нужна модель
-make docker-up        # API + MLflow + Prometheus + Grafana
+make train
+make docker-up
 ```
 
-| Сервис | URL |
-|--------|-----|
-| API (Swagger) | http://localhost:8000/docs |
-| Web UI (мониторинг) | http://localhost:8000/dashboard |
-| Инференс | http://localhost:8000/ui/inference |
-| Эксперименты | http://localhost:8000/ui/experiments |
-| MLflow | http://localhost:5000 |
-| Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 (admin/admin) |
+| Сервис | URL | Логин |
+|--------|-----|-------|
+| API / Swagger | http://localhost:8000/docs | — |
+| Dashboard | http://localhost:8000/dashboard | admin token при retrain |
+| Evidently отчёт | http://localhost:8000/reports/drift.html | — |
+| MLflow | http://localhost:5001 | — |
+| Prometheus | http://localhost:9090 | — |
+| Grafana | http://localhost:3000 | admin / admin |
+
+**Drift simulator** (сервис `drift-simulator` в compose) каждые 30 с генерирует сдвинутый batch и обновляет метрики — на дашборде Grafana видны растущие PSI и `credit_drift_score`.
+
+### 6. DVC pipeline
+
+```bash
+# drift_check: reference vs data/incoming/current.csv → reports/
+PATH="$(pwd)/.venv/bin:$PATH" dvc repro drift_check
+dvc push -r localstorage
+dvc pull -r localstorage
+```
 
 ---
 
-## Web UI
+## Переменные окружения
 
-| Страница | Маршрут | Описание |
-|----------|---------|---------|
-| Dashboard | `/dashboard` | Метрики, таблица предсказаний с флагами аномалий, карточки дрейфа, кнопка переобучения |
-| Инференс | `/ui/inference` | Форма ввода признаков, оценка вероятности дефолта, фидбек |
-| Эксперименты | `/ui/experiments` | Запуски MLflow, champion-метрики, quick reference |
-
-Аномалии: предсказания с вероятностью ≥ 0.8 помечаются как `Аномалия`.
-Уведомления о дрейфе: баннер в шапке dashboard при `degraded = true` в drift-отчёте.
+| Переменная | По умолчанию | Описание |
+|------------|--------------|----------|
+| `MODEL_PATH` | `models/model_bundle_catboost.pkl` | Путь к bundle (fallback если нет Registry) |
+| `MLFLOW_TRACKING_URI` | — | URI MLflow (docker: `http://mlflow:5000`) |
+| `MLFLOW_MODEL_URI` | — | `models:/credit_scoring_catboost/Production` |
+| `ADMIN_RELOAD_TOKEN` | — | Токен для `/internal/retrain` и reload |
+| `DRIFT_REPORT_PATH` | `reports/last_drift.json` | JSON drift |
+| `EVENTS_JSONL_PATH` | `reports/events.jsonl` | Лог предсказаний |
+| `DRIFT_SIM_INTERVAL` | `30` | Интервал симулятора дрейфа (сек) |
 
 ---
 
 ## API
 
 | Метод | Маршрут | Описание |
-|-------|---------|---------|
+|-------|---------|----------|
 | GET | `/health` | Healthcheck |
-| POST | `/v1/score` | Скоринг заёмщика |
-| POST | `/v1/feedback` | Фидбек (реальный исход) |
-| GET | `/v1/metrics/summary` | Агрегированные метрики (AUC, latency, drift) |
-| GET | `/v1/predictions?limit=50` | Последние предсказания с флагами аномалий |
-| GET | `/v1/drift/report` | Текущий drift-отчёт (JSON) |
-| POST | `/internal/reload-model` | Hot-reload модели (X-Admin-Token) |
-| POST | `/internal/retrain` | Запуск переобучения в фоне (X-Admin-Token) |
-| GET | `/internal/retrain/status` | Статус фонового переобучения |
-| GET | `/metrics` | Prometheus scrape endpoint |
+| GET | `/docs`, `/openapi.json` | OpenAPI |
+| POST | `/v1/score` | Скоринг |
+| POST | `/v1/feedback` | Фидбек (y_true) |
+| GET | `/v1/predictions` | Последние предсказания + anomaly |
+| GET | `/v1/drift/report` | JSON drift |
+| GET | `/reports/drift.html` | Evidently HTML |
+| POST | `/internal/retrain` | Фоновое переобучение (X-Admin-Token) |
+| GET | `/metrics` | Prometheus |
 
----
-
-## MLflow: графики и артефакты
-
-При `make train-mlflow` (с Docker: `MLFLOW_URI=http://127.0.0.1:5001`) в каждый run логируются PNG в **Artifacts → plots/** (эксперимент `credit_scoring_served`):
-
-| Файл | Содержание |
-|------|------------|
-| `roc_curves.png` | ROC-кривые train / test / validation |
-| `pr_curves.png` | Precision–Recall |
-| `score_distributions.png` | Распределение скоров по классам |
-| `feature_importance.png` | Top-20 признаков |
-| `learning_curve.png` | AUC по итерациям (CatBoost) |
-| `metrics_comparison.png` | Сравнение ROC-AUC и Gini |
-
-MLflow server запускается с `--serve-artifacts`, чтобы загрузка артефактов с хоста в Docker работала без ошибки `PermissionError: /mlflow`.
-
-После изменения `docker/mlflow/Dockerfile` пересоберите образ: `make docker-build-mlflow && make docker-up`.
-
----
-
-## Мониторинг дрейфа
-
+Пример инференса:
 ```bash
-# Генерация отчёта drift (data + target + concept)
-make drift-check CURRENT=data/incoming/batch.csv
-
-# Или напрямую:
-python scripts/drift_check.py \
-  --reference data/raw/credit_scoring.csv \
-  --current data/incoming/batch.csv \
-  --model-path models/model_bundle_catboost.pkl \
-  --fail-on-drift
+curl -X POST http://localhost:8000/v1/score \
+  -H 'Content-Type: application/json' \
+  -d '{"features":{"RevolvingUtilizationOfUnsecuredLines":0.3,"Age":45,"DebtRatio":0.35,"MonthlyIncome":6000,"NumberOfOpenCreditLinesAndLoans":8,"NumberOfTimes90DaysLate":0,"NumberRealEstateLoansOrLines":1,"NumberOfTime30-59DaysPastDueNotWorse":0,"NumberOfTime60-89DaysPastDueNotWorse":0,"NumberOfDependents":0}}'
 ```
 
-Отчёт сохраняется в `reports/last_drift.json` и отображается в `/dashboard` + Prometheus `/metrics`.
+---
 
-**Три типа дрейфа:**
-- **Data drift** — KS-тест и PSI для каждого признака
-- **Target drift** — z-тест для разницы долей дефолта (ref vs current)
-- **Concept drift** — MAD матриц корреляции + KS распределений скоров
+## Web UI (6 элементов)
+
+| # | Элемент | Маршрут | Реализация |
+|---|---------|---------|------------|
+| 1 | Инференс | `/ui/inference` | POST `/v1/score` + feedback |
+| 2 | Таблица предсказаний | `/dashboard` | `events.jsonl` |
+| 3 | Флаги аномалий | dashboard + API | `probability >= 0.8` |
+| 4 | Переобучение | dashboard кнопка | subprocess → `retrain_pipeline.py` + MLflow |
+| 5 | Эксперименты | `/ui/experiments` | MLflow REST API |
+| 6 | Уведомления дрейфа | banner на dashboard | `reports/last_drift.json` → `degraded` |
 
 ---
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`):
-1. **lint** — `flake8` (max-line-length=100)
-2. **test** — `pytest -q tests`
-3. **docker build** — сборка образов API + MLflow (без push)
-4. **deploy** — `kubectl apply` при push в `main` (если задан `KUBE_CONFIG_B64`)
+`.github/workflows/ci.yml`:
+1. **lint-test** — flake8 + pytest (25 тестов)
+2. **docker** — build API (+ push в GHCR на push в master/main)
+3. **deploy** — обновление `k8s/prod/deployment.yaml` (GitOps для Argo CD)
 
-Ручной запуск переобучения: Actions → **Retrain (manual)** → выбрать `model_type`.
+PR в `master`/`main`: lint, test, docker build (без push).  
+Push в `master`/`main`: полный цикл + обновление image tag.
+
+Conventional Commits проверяются в `commitlint.yml`.
 
 ---
 
-## Kubernetes (Minikube)
+## Kubernetes + Argo CD
 
 ```bash
-# Один скрипт (нужен Docker + minikube + kubectl):
+# Minikube (локально)
 make minikube-deploy
 
-# Проверка:
-kubectl get pods
-minikube service credit-scoring-api --url
-
-# Job переобучения (после подготовки данных):
-kubectl apply -f k8s/manual/job-retrain.yaml
-```
-
-NodePorts: API **30800**, MLflow **30500**, Prometheus **30909**.
-
----
-
-## ArgoCD (CD в Kubernetes)
-
-```bash
-# Установка ArgoCD (если ещё нет):
+# Argo CD
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-
-# Деплой приложения:
 kubectl apply -f argocd/application.yaml
-
-# Веб-интерфейс:
-kubectl port-forward svc/argocd-server -n argocd 8080:443
-# Логин: admin, пароль: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+kubectl get applications -n argocd
 ```
 
-ArgoCD будет автоматически синхронизировать состояние кластера с папкой `k8s/` репозитория (`automated.selfHeal: true`).
+Манифесты: `k8s/prod/` (GHCR + MLflow Registry), `k8s/local/` (hostPath модель), `k8s/ingress.yaml`, `k8s/service.yaml` (NodePort 30800).
 
 ---
 
-## Цикл деградации → переобучение → reload
+## Структура проекта (Cookiecutter DS)
+
+```
+credit_scoring/
+├── src/
+│   ├── api/                 # FastAPI + Jinja2 UI
+│   ├── models/              # train, predict, MLflow pyfunc
+│   ├── monitoring/          # drift (scipy + Evidently), Prometheus
+│   ├── features/
+│   └── data/
+├── scripts/                 # drift_check, drift_simulator, retrain_pipeline
+├── data/raw/                # credit_scoring.csv (DVC), synthetic_min.csv
+├── models/                  # .pkl (DVC)
+├── reports/                 # drift JSON/HTML, events.jsonl
+├── monitoring/              # prometheus.yml, grafana/
+├── k8s/                     # Deployment, Service, Ingress
+├── argocd/                  # Application manifest
+├── dvc.yaml                 # pipeline: drift_check, train
+└── .github/workflows/       # ci.yml, commitlint.yml
+```
+
+---
+
+## Тесты
 
 ```bash
-# 1. Получили новые данные
-python scripts/drift_check.py --current data/incoming/new_batch.csv --fail-on-drift
-
-# 2. Если drift обнаружен — переобучаем
-make retrain
-# или через API:
-curl -X POST http://localhost:8000/internal/retrain -H "X-Admin-Token: $ADMIN_RELOAD_TOKEN"
-
-# 3. Hot-reload модели в сервисе
-curl -X POST http://localhost:8000/internal/reload-model -H "X-Admin-Token: $ADMIN_RELOAD_TOKEN"
-
-# 4. Мониторинг — drift отчёт обновлён, Grafana показывает метрики
+make test          # pytest -q tests
+make lint          # flake8
+make final-check   # lint + test + compose config
 ```
 
 ---
 
-## Тесты и линтер
+## Известные ограничения
 
-```bash
-# Lint
-flake8 --max-line-length=100 --extend-exclude=.dvc src tests scripts
-
-# Tests
-pytest -q tests          # 22+ тестов: API, drift computation
-
-# Финальная проверка (lint + tests + docker compose config):
-make final-check
-
-# С запуском контейнеров и curl всех URL:
-make final-check-docker
-```
-
----
-
-## Шаблон Cookiecutter
-
-Проект инициализирован на базе шаблона [**Cookiecutter Data Science**](https://drivendata.github.io/cookiecutter-data-science/):
-
-```bash
-cookiecutter gh:drivendata/cookiecutter-data-science
-# project_name: credit_scoring, python_version: 3.11
-```
-
-Структура каталогов (`src/`, `data/`, `models/`, `reports/`, `Makefile`, `setup.py`, `docs/`) сохранена и расширена MLOps-компонентами (API, мониторинг, k8s, CI/CD).
-
----
-
-## Git flow и конвенции
-
-- **`main`** — стабильная ветка, деплой только через PR
-- **`feature/<task>`**, **`fix/<task>`** — рабочие ветки
-- [Conventional Commits](https://www.conventionalcommits.org/): `feat(api): batch score`, `fix(drift): PSI bins`, `ci: add retrain workflow`
-- DVC для версионирования данных и моделей (`dvc pull` / `dvc push`)
+- Полный датасет (150k) — через `dvc pull -r mlops` (Google OAuth) или `make fetch-data`.
+- MLflow Registry stages deprecated в MLflow 3.x — используем Staging/Production для совместимости с учебным заданием.
+- Grafana в Minikube не развёрнута — используйте `docker compose` для дашбордов дрейфа.
+- Argo CD sync требует доступного K8s-кластера и секрета `ghcr-secret` для pull образа.
 
 ---
 
