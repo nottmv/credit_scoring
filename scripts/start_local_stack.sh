@@ -32,7 +32,9 @@ echo "Starting MLflow on http://127.0.0.1:5000 ..."
 sleep 2
 
 echo "Starting API on http://127.0.0.1:8000 ..."
-nohup python3 -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 \
+PY="${PYTHON:-python3}"
+if [ -x "$ROOT/.venv/bin/python" ]; then PY="$ROOT/.venv/bin/python"; fi
+nohup "$PY" -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 \
   > /tmp/credit_scoring_api.log 2>&1 &
 sleep 2
 

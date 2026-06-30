@@ -85,5 +85,30 @@ services:
     depends_on:
       - prometheus
 
+  drift-simulator:
+    build: .
+    image: credit-scoring-api:latest
+    command:
+      [
+        "python",
+        "scripts/drift_simulator.py",
+        "--interval",
+        "${DRIFT_SIM_INTERVAL:-30}",
+      ]
+    environment:
+      DRIFT_REFERENCE: /app/data/raw/synthetic_min.csv
+      MODEL_PATH: /app/models/model_bundle_catboost.pkl
+      DRIFT_REPORTS_DIR: /app/reports
+      DRIFT_SIM_INTERVAL: "${DRIFT_SIM_INTERVAL:-30}"
+    volumes:
+      - ./data:/app/data:ro
+      - ./models:/app/models:ro
+      - ./reports:/app/reports
+      - ./scripts:/app/scripts:ro
+      - ./src:/app/src:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   mlflow_data:
